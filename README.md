@@ -4,7 +4,7 @@ A private, local web app for finding relevant jobs, preparing evidence-based res
 
 **Runs at `http://127.0.0.1:8765`. Nothing is deployed. No paid AI API, API key, or per-token billing is required.** The core app runs on Python 3.11+ without installing third-party packages.
 
-This is an initial working version, not a universal unattended application agent. Real employer forms vary. The implementation includes a conservative browser runner; live employer submissions, a real mailbox, and a downloaded model still need to be validated on your computer.
+The application agent discovers public jobs, screens mandatory requirements, uses a local model for a second fit review, prepares factual resumes, and attempts supported employer forms. Account-only pages, verification challenges, and unanswered required questions are recorded while other jobs continue. Employer shortlisting cannot be guaranteed.
 
 ## Start in two commands
 
@@ -31,14 +31,14 @@ The server always binds to `127.0.0.1`. There is deliberately no `--host 0.0.0.0
 
 | Feature | Current behavior |
 | --- | --- |
-| Local dashboard | Overview, opportunities, profile, application tracker, job sources, inbox signals, settings |
+| Local dashboard | Overview, application agent, opportunities, profile, application tracker, job sources, inbox signals, settings |
 | Resume intake | Paste text or upload TXT; PDF/DOCX import with optional dependencies |
-| Job discovery | Public Greenhouse, Lever, and Ashby company board feeds; Lever pagination |
-| Other job websites | Paste a JD and its URL, or import a JSON list; no login scraping |
+| Job discovery | Resume-derived public searches, LinkedIn guest listings, structured employer postings, observed employer board links, and Greenhouse/Lever/Ashby feeds |
+| Other job websites | Public Naukri/Indeed search attempts report access failures; no login or challenge bypass |
 | Matching | Explainable weighted coverage of recognized JD skills against the original resume |
 | Eligibility | Strictly greater than 80% by default, job-title/location filters, experience checks, salary policy, company exclusions |
-| Tailored resumes | Select relevant source lines, preserve the full original resume and employer/date context, export TXT/HTML and optional PDF/DOCX |
-| Local AI | Optional Ollama Qwen3 models select source line IDs; generated claims are never inserted |
+| Tailored resumes | Reorder relevant skills and bullets within their original projects; retain experience, education and factual context; export TXT/HTML/PDF/DOCX |
+| Local AI | Ollama Qwen3 selects source evidence and screens core-role fit; uncertain or invalid fit reviews block submission |
 | Application runner | Optional local Playwright browser for supported ATS hosts, exact known field answers, resume upload, conservative submission detection |
 | Daily limits | Default 25, maximum 30 automated attempts, at most one per company per local calendar day |
 | Duplicate protection | SQLite transactions; confirmed and uncertain applications cannot be automatically repeated |
@@ -54,12 +54,12 @@ The server always binds to `127.0.0.1`. There is deliberately no `--host 0.0.0.0
 2. Paste your complete resume, or install optional packages and upload PDF/DOCX. Review extracted text, especially PDF line breaks and tables.
 3. Add LinkedIn/GitHub/portfolio links if relevant. Add exact answers for custom application questions you already know.
 4. Check the profile verification box and save. Saving profile changes pauses automatic submission.
-5. Open **Job sources**. Add verified company board slugs from employer careers pages.
+5. Open **Application agent** to inspect resume-derived search queries. Verified company boards can also be added in **Job sources**.
 6. Click **Sync all sources**. Errors appear in Overview activity; a failed source does not close its cached jobs.
 7. Open **Opportunities**, inspect the score and full JD, and click **Prepare tailored resume**.
 8. Download the resume. Confirm that its content and formatting suit the role.
 9. In **Settings**, adjust titles, locations, salary preference, and the attempt limit. Default location is Bengaluru/Bangalore, minimum salary preference ₹15 LPA, threshold strictly above 80%.
-10. When your profile and browser dependencies are ready, enable **Submit eligible applications automatically** and optionally the daily schedule. These controls configure the app you run; this build has not applied to any real jobs.
+10. When your profile and browser dependencies are ready, enable **Submit eligible applications automatically** and optionally the daily schedule. The application tracker distinguishes confirmed submissions, unanswered questions, and uncertain outcomes.
 
 A strong match score is not an ATS score, a complete qualification assessment, or a probability of receiving a call. Keywords do not establish proficiency, work authorization, degree equivalence, seniority, or country-specific remote eligibility. Review the JD and configure factual answers. A 100% skill score never guarantees an interview.
 
@@ -118,7 +118,7 @@ Examples from Ollama's documented environment configuration:
 
 JobPilot only calls `http://127.0.0.1:11434`, disables proxy use for local AI calls, and allows only the three listed model names. In **Settings**, click **Check model connection**. You can leave AI off: matching and evidence-only resume preparation work without Ollama.
 
-The model receives resume lines and the JD and returns line IDs. Code validates every ID and copies only original lines. If the model is missing, times out, or returns invalid IDs, the app falls back to deterministic selection. Full original experience and education remain in every packet to retain factual context. The current implementation prioritizes evidence; it does not freely rewrite achievements or invent cover-letter claims.
+The model receives resume lines and the JD and returns line IDs. Code validates every ID and copies only original lines. If the model is missing, times out, or returns invalid IDs, the app falls back to deterministic selection. The separate pre-submission fit review must return a valid strong decision; model failure never authorizes an application. Full original experience and education remain in every packet to retain factual context. The current implementation prioritizes evidence; it does not freely rewrite achievements or invent cover-letter claims.
 
 ## Company sources
 
@@ -134,7 +134,7 @@ Enter the provider, company display name and slug in **Job sources**. A company'
 
 Public feed reads need no employer API credential. Greenhouse's application API requires an employer key, so JobPilot does not attempt to use that endpoint. Submissions use the browser adapter instead.
 
-JobPilot does not discover every company across the entire web automatically. LinkedIn, Naukri, Indeed, Workday, iCIMS, employer-specific portals, and EU Lever feeds do not have automatic discovery adapters in this version. Their JDs can be imported for scoring and resume preparation. EU Lever application hosts are allowed if reached from a supported record, but EU feed configuration still needs an adapter extension.
+Discovery uses generic role, skill, and location queries derived from the resume; it never sends contact information or full resume text to search engines. LinkedIn public listings are supported. Naukri and Indeed public searches can return no results or block access; the source report shows this explicitly. Employer links found on public company pages can expand the board list. Search coverage is bounded, not exhaustive. Account-only applications and unsupported portals still require an adapter or account access.
 
 ### JSON job import
 
@@ -159,11 +159,11 @@ Only enter salary and experience values when the posting explicitly provides the
 ## Application behavior and limits
 
 - The app uses regular Playwright Chromium, visible by default. It does not spoof a human identity, use stealth plugins, solve CAPTCHAs, bypass logins, or evade site restrictions.
-- Supported main-page hosts are Lever, Greenhouse, and Ashby application hosts listed in `jobpilot/browser.py`.
-- The generic adapter fills native fields identified by labels or a small exact name allowlist. Custom dropdowns, multi-step applications, embedded forms, ambiguous submit controls, and unknown required fields can stop the attempt.
+- Supported main-page hosts are Lever, Greenhouse, Ashby, and verified public employer pages. Aggregator listings need an employer application link; job-board account applications are not implemented.
+- The generic adapter fills native fields identified by labels or a small exact name allowlist. Exact-option comboboxes are supported. Other custom widgets, multi-step applications, embedded forms, ambiguous submit controls, and unknown required fields can stop the attempt.
 - Resume uploads use the tailored PDF or DOCX. Browser evidence is saved under `data/evidence/`.
 - Work authorization, sponsorship, expected salary, sensitive personal questions, and consent are answered only when you supplied an exact answer in the profile's question bank. A required unanswered question becomes `needs_input`.
-- CAPTCHAs and login challenges become `needs_input`; finish these applications on the employer's site. This version does not hand over a persistent browser session: it saves evidence and closes the automation browser.
+- CAPTCHAs and login challenges become `needs_input`; the app continues with other employers. This version does not hand over a persistent browser session: it saves evidence and closes the automation browser.
 - The current generic adapter is intentionally conservative and may require manual completion even on supported ATS platforms. Provider-specific form refinements and live tests are still necessary before trusting unattended runs.
 - The company feed is rechecked immediately before an application. Changed requirements are scored again.
 - An attempt is reserved atomically before browser actions. Missing fields and browser failures consume an attempt and the company slot for that day, avoiding retry loops.
@@ -212,7 +212,7 @@ Default: **09:30 Asia/Kolkata**, schedule initially disabled until setup.
 
 The app checks the clock every 20 seconds. After the configured time, it runs one daily cycle: sync sources, rank jobs, attempt eligible roles when automatic submission is enabled, then optionally check mail. Missed past days are not replayed. An interrupted or failed daily cycle is recorded for that day and is not automatically repeated; click **Run today's search** after correcting the issue.
 
-The computer must be awake and the Python process running. For a login-started routine, add `start.bat` or `start.sh` to your OS startup items yourself. No OS scheduled task is installed by this project.
+The computer must be awake and the user logged in for a local login-started routine. On macOS, `python scripts/install_local_agent.py --start` installs user LaunchAgents for JobPilot and Ollama, starts them, and restarts them after process failure. It uses the project virtual environment, local model directory, loopback-only services, and Ollama cloud-disabled mode. Logs are under `data/logs`. The services run without keeping a terminal open. On this configured Mac the daily routine is enabled for 09:30 Asia/Kolkata, with 25 attempts maximum.
 
 ## Put the source in your private GitHub repository
 

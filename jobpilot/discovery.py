@@ -6,8 +6,9 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from html import unescape
 from html.parser import HTMLParser
-from urllib.parse import quote, urlencode, urljoin, urlsplit
-from .matching import skills
+from urllib.parse import quote, urlencode, urljoin, urlsplit, parse_qs
+from urllib.error import HTTPError
+from .matching import skills, evaluate
 from .sources import canonical_url, normalize, plain, fetch_board
 from .transport import read_public
 
@@ -72,6 +73,20 @@ def linkedin_public(query, location, fetch=read_public):
                              if urlsplit(link).hostname in ('www.linkedin.com', 'in.linkedin.com') and '/jobs/view/' in link))[:10]
 
 
+def board_search_public(source,query,location,fetch=read_public):
+    if source=='indeed':
+        url='https://in.indeed.com/jobs?'+urlencode({'q':query,'l':location})
+    elif source=='naukri':
+        slug=lambda value:re.sub(r'[^a-z0-9]+','-',value.lower()).strip('-')
+        url=f'https://www.naukri.com/{slug(query)}-jobs-in-{slug(location)}'
+    else:raise ValueError('Unknown board search source')
+    body,final=fetch(url);parser=PageParser();parser.feed(body)
+    if re.search(r'verify (?:you are|that you are) human|access denied|captcha challenge',plain(body),re.I):
+        raise ValueError('Public search requires verification; no bypass attempted')
+    return list(dict.fromkeys(urljoin(final,link) for link in parser.links
+            if ('/viewjob?' in link if source=='indeed' else '/job-listings-' in link)))[:10]
+
+
 def job_nodes(value):
     if isinstance(value, list):
         for child in value: yield from job_nodes(child)
@@ -112,7 +127,8 @@ def structured_jobs(body, url):
         source = next((x for x in ('linkedin', 'naukri', 'indeed') if x in source_host), 'careers')
         record = normalize(source, hashlib.sha256(url.encode()).hexdigest(), company, title, url, description,
                            '; '.join(filter(None, names)), verified_public_posting=True, discovery_url=url,
-                           posted_at=node.get('datePosted'), application_kind='browser')
+                           posted_at=node.get('datePosted'), application_kind='browser',
+                           company_profile_url=org.get('sameAs') if isinstance(org,dict) else None)
         salary = node.get('baseSalary') or {}
         if isinstance(salary, dict) and salary.get('currency') == 'INR':
             value = salary.get('value') or {}
@@ -121,6 +137,34 @@ def structured_jobs(body, url):
                 if isinstance(amount, (int, float)) and not isinstance(amount, bool): record['salary_max_lpa'] = amount / 100000
         results.append(record)
     return results, parser.links
+
+
+def employer_boards(company_profile_url,fetch=read_public):
+    """Follow the public company website link, then its observed careers links."""
+    if not company_profile_url or urlsplit(company_profile_url).hostname not in ('www.linkedin.com','in.linkedin.com'):
+        return []
+    body,final=fetch(company_profile_url)
+    match=re.search(r'<a\b[^>]*data-tracking-control-name=["\'][^"\']*about_website[^"\']*["\'][^>]*>',body,re.I)
+    if not match:
+        match=re.search(r'<dt[^>]*>\s*Website\s*</dt>\s*<dd[^>]*>\s*<a\b[^>]*>',body,re.I)
+    if not match:return []
+    href=re.search(r'href=["\']([^"\']+)',match.group(0),re.I)
+    if not href:return []
+    website=unescape(href.group(1))
+    parsed=urlsplit(website)
+    if parsed.hostname in ('www.linkedin.com','in.linkedin.com') and parsed.path=='/redir/redirect':
+        website=parse_qs(parsed.query).get('url',[''])[0]
+    if urlsplit(website).scheme!='https':return []
+    body,home=fetch(website);parser=PageParser();parser.feed(body)
+    observed=[urljoin(home,link) for link in parser.links]
+    boards=[board_from_url(link) for link in observed]
+    careers=[link for link in observed if re.search(r'career|/jobs(?:/|$)',urlsplit(link).path,re.I)
+             and urlsplit(link).scheme=='https']
+    for link in list(dict.fromkeys(careers))[:2]:
+        if board_from_url(link):continue
+        content,final=fetch(link);page=PageParser();page.feed(content)
+        boards.extend(board_from_url(urljoin(final,value)) for value in page.links)
+    return [board for board in boards if board]
 
 
 def refresh_public_job(job, fetch=read_public):
@@ -139,24 +183,31 @@ def discover(profile, settings, fetch=read_public, board_fetch=fetch_board, stop
     queries = query_plan(profile, settings); report=[]; boards={}; urls=[]; jobs={}
     enabled = settings.get('discovery_sources', ['employers', 'linkedin', 'naukri', 'indeed'])
     max_pages = settings.get('discovery_page_limit', 30)
+    blocked_hosts=set()
     for source in enabled:
         if stopped and stopped.is_set(): break
         found=[]
         try:
             if source == 'linkedin':
-                found = linkedin_public(queries[0]['role'] + ' ' + ' '.join(queries[0]['keywords'][:2]), queries[0]['location'], fetch)
+                for plan in queries:
+                    found.extend(linkedin_public(plan['role'] + ' ' + ' '.join(plan['keywords'][:2]),plan['location'],fetch))
+            elif source in ('naukri','indeed'):
+                found=board_search_public(source,queries[0]['role'],queries[0]['location'],fetch)
             else:
                 for plan in queries[:2]:
                     found.extend(x['url'] for x in search_public(plan['query'] + ' ' + SEARCH_DOMAINS[source], fetch))
             # Search engines sometimes ignore site filters. Never label unrelated links as source results.
-            if source != 'employers':
+            if source == 'employers':
+                found = [u for u in found if urlsplit(u).hostname in ATS]
+            else:
                 found = [u for u in found if source in (urlsplit(u).hostname or '').split('.')]
             urls.extend(found)
-            report.append({'source': source, 'status': 'searched', 'results': len(found)})
+            report.append({'source': source, 'status': 'searched' if found else 'no_public_results', 'results': len(found)})
         except Exception as exc:
             report.append({'source': source, 'status': 'unavailable', 'detail': f'{type(exc).__name__}: public access unavailable; no bypass attempted'})
     for raw_url in list(dict.fromkeys(urls))[:max_pages]:
         if stopped and stopped.is_set(): break
+        if urlsplit(raw_url).hostname in blocked_hosts:continue
         try:
             url = canonical_url(raw_url)
             board = board_from_url(url)
@@ -170,10 +221,22 @@ def discover(profile, settings, fetch=read_public, board_fetch=fetch_board, stop
                 board = board_from_url(urljoin(final_url, unescape(link)))
                 if board: boards[(board['provider'], board['slug'])] = board
         except Exception as exc:
+            if isinstance(exc,HTTPError) and exc.code in (401,403,429):blocked_hosts.add(urlsplit(raw_url).hostname)
             report.append({'source': urlsplit(raw_url).hostname, 'status': 'skipped',
                            'detail': f'{type(exc).__name__}: posting could not be verified'})
+        if stopped:stopped.wait(.5)
+    prioritized=sorted(jobs.values(),key=lambda j:evaluate(profile,j,settings)['score'],reverse=True)
+    company_profiles=list(dict.fromkeys(j.get('company_profile_url') for j in prioritized if j.get('company_profile_url')))
+    for company_url in company_profiles[:6]:
+        if stopped and stopped.is_set():break
+        try:
+            for board in employer_boards(company_url,fetch):boards[(board['provider'],board['slug'])]=board
+        except Exception as exc:
+            report.append({'source':urlsplit(company_url).hostname,'status':'company_lookup_unavailable','detail':type(exc).__name__})
     for board in list(boards.values())[:12]:
         if stopped and stopped.is_set(): break
+        known=next((b for b in settings.get('boards',[]) if b['provider']==board['provider'] and b['slug']==board['slug']),None)
+        if known:board.update(known)
         try:
             entries = board_fetch(board)
             for entry in entries: jobs[entry['id']] = entry

@@ -1,0 +1,15 @@
+'use strict';
+function automation(){
+  const s=state.settings,d=state.discovery||{},questions=state.questions||[];
+  return heading('Your application agent.','Discovery, evidence checks, tailored resumes and verified submissions.',`<button class="primary" data-action="task" data-kind="cycle">Run search and applications ↗</button>`)+stats()+
+    `<section class="panel"><div class="panel-head"><h2>${s.auto_submit&&s.schedule_enabled?'Automatic routine enabled':'Automatic routine paused'}</h2>${badge(state.busy?'running':s.auto_submit?'ready':'paused')}</div><p>Daily run: ${esc(s.run_at)} ${esc(s.timezone)} · maximum ${s.daily_limit} attempts · one attempt per company per day.</p><p>${s.strict_required_skills?'Roles with unsupported mandatory skills are skipped.':'Roles must pass the configured evidence threshold.'} ${s.use_ai?'Local AI adds a second fit review before submission.':'Evidence-based matching is active.'}</p><div class="form-actions"><button class="secondary" data-action="enable-agent">Enable daily automation</button><button class="quiet" data-action="pause">Pause automation</button></div></section>`+
+    `<div class="split"><section class="panel"><h2>Search derived from your resume</h2>${(state.search_plan||[]).map(q=>`<div class="source-row"><div><strong>${esc(q.role)}</strong><p>${esc(q.location)} · ${esc(q.keywords.join(', '))}</p></div></div>`).join('')}<button class="secondary" data-action="task" data-kind="discover">Find new employers</button></section><section class="panel"><h2>Source access</h2><p class="small muted">${d.created?'Last checked: '+esc(new Date(d.created).toLocaleString()):'The next discovery run will check public source access.'}</p>${(d.sources||[]).map(x=>`<div class="source-row"><div><strong>${esc(x.source)}</strong><p>${esc(x.detail||((x.results??0)+' public results'))}</p></div>${badge(x.status)}</div>`).join('')||'<p>No source check has run yet.</p>'}<p class="small muted">Account-only pages and verification challenges are skipped while other sources continue. A discovered listing is not a submitted application.</p></section></div>`+
+    `<section class="panel"><h2>Information the agent still needs</h2>${questions.length?questions.map(q=>`<div class="source-row"><div><strong>${esc(q.company)}</strong><p>${esc(q.detail)}</p></div><button class="link-button" data-action="job" data-id="${esc(q.job_id)}">View details</button></div>`).join(''):'<p>No unanswered application questions have been collected.</p>'}<p class="small muted">Saved factual answers are reused. The agent does not guess personal characteristics, qualifications, or account credentials.</p></section>`;
+}
+document.addEventListener('click',async event=>{
+  const button=event.target.closest('[data-action="enable-agent"]');
+  if(!button)return;
+  button.disabled=true;
+  try{await api('/api/settings',{auto_submit:true,schedule_enabled:true,discovery_enabled:true,headless:true});toast('Daily discovery and eligible applications enabled.');await refresh(true)}
+  catch(error){toast(error.message)}finally{button.disabled=false}
+});

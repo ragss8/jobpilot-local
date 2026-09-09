@@ -13,10 +13,11 @@ const errors=[];
 const context=vm.createContext({document:{querySelector:node,querySelectorAll:()=>[],addEventListener(){}},window:{addEventListener(){}},
 location:{hash:''},setTimeout:()=>1,clearTimeout(){},setInterval(){},console,
 fetch:async url=>({ok:true,json:async()=>url==='/api/session'?{token:'fixture-token'}:fixture})});
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../jobpilot/static/automation.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../jobpilot/static/app.js'),'utf8'),context);
 (async()=>{
   await new Promise(resolve=>setImmediate(resolve));
-  for(const name of ['overview','jobs','profile','tracker','sources','inbox','settings']){
+  for(const name of ['automation','overview','jobs','profile','tracker','sources','inbox','settings']){
     vm.runInContext(`page='${name}';render()`,context);
     const html=node('#main').innerHTML;
     assert(html.includes('<h1>'),`${name} has a heading`);
@@ -33,5 +34,10 @@ vm.runInContext(fs.readFileSync(path.join(__dirname,'../jobpilot/static/app.js')
   for(const name of ['overview','tracker'])vm.runInContext(`page='${name}';render()`,context);
   vm.runInContext("eligibleOnly=true;search='not-a-match';page='jobs';render()",context);
   assert(node('#main').innerHTML.includes('No opportunities yet'));
-  console.log('PASS: 7 view renderers, dynamic opportunity data, user-text escaping and filtering.');
+  fixture.questions=[{job_id:'abc123abc123abc123ab',company:'<script>bad</script>',detail:'Missing <img src=x onerror=bad>'}];
+  fixture.discovery={sources:[{source:'linkedin',status:'unavailable',detail:'<script>unsafe</script>'}]};
+  vm.runInContext("page='automation';render()",context);
+  assert(!node('#main').innerHTML.includes('<script>'));
+  assert(node('#main').innerHTML.includes('&lt;script&gt;'));
+  console.log('PASS: 8 view renderers, discovery and question escaping, dynamic opportunity data and filtering.');
 })().catch(error=>{console.error(error);process.exitCode=1});

@@ -9,7 +9,11 @@ JobPilot is a single-user Python application with a plain JavaScript frontend. K
 | `db.py` | SQLite persistence, attempts, audit events, duplicate handling and recovery |
 | `locking.py` | Process lock for one running app per data directory |
 | `sources.py` | Greenhouse, Lever, Ashby normalization; pagination; HTML-to-text conversion |
-| `matching.py` | Explicit skill vocabulary, aliases, weighted coverage and basic eligibility filters |
+| `discovery.py` | Resume-led public discovery, structured postings, observed employer links, source access reports |
+| `transport.py` | Verified TLS, public HTTPS destination checks and validated redirects |
+| `matching.py` | Skill aliases, explicit technology alternatives, mandatory-skill exclusions and eligibility |
+| `assessment.py` | Local semantic fit review with constrained JSON, source references and fail-closed validation |
+| `tailoring.py` | Structured factual resume layout preserving project and employment context |
 | `resume.py` | Resume extraction, evidence selection, optional local model, validated line references, export |
 | `browser.py` | Conservative visible Playwright browser, known answers, uploads, confirmation evidence |
 | `mailbox.py` | TLS IMAP read-only polling, deduplication, recruiting signal classification |
@@ -18,11 +22,11 @@ JobPilot is a single-user Python application with a plain JavaScript frontend. K
 ## End-to-end flow
 
 1. The user saves factual profile information and original resume text.
-2. Company feed adapters fetch public JSON and normalize job descriptions.
+2. Public discovery derives role/skill/location queries from resume evidence; verified company feeds normalize current jobs.
 3. The matcher compares recognized JD skills with skills actually present in the original resume.
 4. Role/location/experience/salary filters decide whether the job is eligible for automation.
-5. Resume preparation selects verbatim supporting lines, then retains the full original source resume. It writes formats and a fingerprint of the profile and job content.
-6. Before an automatic application, the worker re-fetches the employer feed, checks whether the job is still listed, rescans changed requirements, and prepares a fresh packet.
+5. Structured resume preparation reorders factual skills and bullets within project boundaries, preserving experience and education. The packet keeps the original resume and a profile/job fingerprint.
+6. Before an automatic application, the worker re-fetches the employer feed or verified posting, checks current requirements, and requires a valid strong local-model fit decision when AI is enabled. It then prepares a fresh packet.
 7. A SQLite immediate transaction reserves the daily/company slot and rejects duplicates.
 8. The local browser fills only exact known answers and uploads the generated resume. Required unsupported fields and bot challenges stop that application.
 9. New employer confirmation text after a submit click records `submitted`. An unconfirmed click or interrupted process records `uncertain`.
@@ -62,11 +66,11 @@ Attempts are durable and unique sends are enforced independently of the displaye
 ## Untrusted input boundaries
 
 - Job descriptions, model responses, resumes and emails are data, not instructions.
-- Model output is limited to validated integer indexes into original resume lines; it cannot request tools or author new achievements.
+- Resume selection uses validated source indexes. Fit review returns a constrained decision, source indexes, and exact JD gap excerpts; contradictory strong decisions with gaps are downgraded. Models cannot request tools or author achievements.
 - A prepared packet fingerprint changes when profile or JD content changes; the UI warns about stale packets.
 - Browser field values come from profile data and exact question-answer mappings, not the JD or mailbox.
 - JSON endpoint mutations require a same-origin local request and a per-process token. User text is escaped in the UI and exported HTML.
-- Source feed hosts are hard-coded; arbitrary imported URLs are not server-fetched. Browser main-frame navigation uses an ATS host allowlist and rejects private-network requests.
+- Feed hosts are fixed; public discovery additionally validates HTTPS destinations and redirects against private addresses. Imported records are not automatically trusted for submission. Browser navigation is restricted to supported ATS hosts or the verified employer host and rejects private-network destinations.
 
 ## Extension priorities
 

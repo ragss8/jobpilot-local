@@ -74,7 +74,7 @@ class Handler(BaseHTTPRequestHandler):
                 if name.split('.')[-1] not in packet['formats']: raise ValueError('Export format not available')
                 target=service.store.directory/'packets'/jid/name
                 return self.send(target.read_bytes(),kind=mimetypes.guess_type(name)[0] or 'application/octet-stream',headers={'Content-Disposition':f'attachment; filename="{jid}-{name}"'})
-            assets={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}
+            assets={'/':'index.html','/app.js':'app.js','/automation.js':'automation.js','/style.css':'style.css'}
             if path in assets:
                 file=STATIC/assets[path]
                 return self.send(file.read_bytes(),kind=mimetypes.guess_type(str(file))[0] or 'text/plain')

@@ -13,11 +13,15 @@ from .sources import fetch_board,normalize
 from .resume import build_packet,extract_upload,model_status
 from .browser import run_application
 from . import mailbox
+from .discovery import discover, query_plan, refresh_public_job
 
 DEFAULT_SETTINGS={'threshold':80,'daily_limit':25,'roles':['full stack','full-stack','software engineer','frontend','backend'],
     'locations':['Bengaluru','Bangalore'],'min_salary_lpa':15,'require_salary':False,'excluded_companies':[],
     'keywords':[],'boards':[],'model':'qwen3:4b','use_ai':False,'auto_submit':False,
-    'schedule_enabled':False,'run_at':'09:30','timezone':'Asia/Kolkata','mail_enabled':False,'headless':False}
+    'schedule_enabled':False,'run_at':'09:30','timezone':'Asia/Kolkata','mail_enabled':False,'headless':False,
+    'discovery_enabled':True,'discovery_sources':['employers','linkedin','naukri','indeed'],
+    'discovery_page_limit':30,'browser_channel':'chrome','structured_tailoring':True,
+    'strict_required_skills':False,'excluded_required_skills':[]}
 DEFAULT_PROFILE={'name':'','email':'','phone':'','location':'Bengaluru, India','years':None,'current_company':'',
                  'linkedin':'','github':'','portfolio':'','resume_text':'','answers':{},'verified':False}
 
@@ -45,6 +49,7 @@ def strings(value,label,limit=100):
 class Service:
     def __init__(self,directory):
         self.store=Store(directory); self.lock=threading.Lock(); self.tasks={}; self.stopped=threading.Event()
+        self._match_cache={}
         if not self.store.get('settings'): self.store.set('settings',DEFAULT_SETTINGS)
         if not self.store.get('profile'): self.store.set('profile',DEFAULT_PROFILE)
         self.scheduler=threading.Thread(target=self._schedule,daemon=True)
@@ -61,8 +66,12 @@ class Service:
         number(s['threshold'],'Threshold',0,99)
         number(s['daily_limit'],'Daily limit',1,30,True)
         number(s['min_salary_lpa'],'Minimum salary',0,500)
-        for k in ('roles','locations','excluded_companies','keywords'): s[k]=strings(s[k],k)
-        for k in ('require_salary','use_ai','auto_submit','schedule_enabled','mail_enabled','headless'):
+        number(s['discovery_page_limit'],'Discovery pages',1,100,True)
+        if s['browser_channel'] not in ('chrome','chromium'): raise ValueError('Choose Chrome or Chromium')
+        if not isinstance(s['discovery_sources'],list) or not s['discovery_sources'] or any(x not in ('employers','linkedin','naukri','indeed') for x in s['discovery_sources']):
+            raise ValueError('Choose supported discovery sources')
+        for k in ('roles','locations','excluded_companies','keywords','excluded_required_skills'): s[k]=strings(s[k],k)
+        for k in ('require_salary','use_ai','auto_submit','schedule_enabled','mail_enabled','headless','discovery_enabled','structured_tailoring','strict_required_skills'):
             if not isinstance(s[k],bool): raise ValueError(f'{k} must be true or false')
         from .resume import LOCAL_MODELS
         if s['model'] not in LOCAL_MODELS: raise ValueError('Choose a supported local Ollama model')
@@ -110,7 +119,13 @@ class Service:
 
     def ranked(self):
         p=self.profile(); s=self.settings()
-        jobs=[dict(j,match=evaluate(p,j,s)) for j in self.store.jobs()]
+        jobs=[]
+        profile_key=hashlib.sha256(json.dumps([p,s],sort_keys=True).encode()).hexdigest()
+        for j in self.store.jobs():
+            key=hashlib.sha256((profile_key+json.dumps(j,sort_keys=True)).encode()).hexdigest()
+            if key not in self._match_cache:self._match_cache[key]=evaluate(p,j,s)
+            jobs.append(dict(j,match=self._match_cache[key]))
+        if len(self._match_cache)>10000:self._match_cache.clear()
         return sorted(jobs,key=lambda j:(j['match']['eligible'],j['match']['score']),reverse=True)
 
     def state(self):
@@ -119,6 +134,8 @@ class Service:
             attempted=c.execute('SELECT count(*) FROM attempts WHERE day=?',(day,)).fetchone()[0]
         jobs=self.ranked()
         return {'settings':s,'profile':self.profile(),'jobs':jobs,'events':self.store.rows('events',30),
+                'discovery':self.store.get('last_discovery',{}),'search_plan':query_plan(self.profile(),s),
+                'questions':self.store.get('pending_questions',[]),
                 'attempts':self.store.rows('attempts'),'messages':self.store.rows('messages'),
                 'tasks':list(self.tasks.values())[-20:], 'last_sync':self.store.get('last_sync'),
                 'stats':{'discovered':len(jobs),'eligible':sum(x['match']['eligible'] and x['status'] in ('new','prepared','queued') for x in jobs),
@@ -162,9 +179,25 @@ class Service:
         self.store.set('last_sync',now()); self.store.event('sync',f'Synced {count} postings; {len(errors)} board errors')
         return {'jobs':count,'errors':errors}
 
+    def discover(self):
+        if not self.profile()['resume_text'].strip(): raise ValueError('A resume is required for discovery')
+        result=discover(self.profile(),self.settings(),stopped=self.stopped)
+        for job in result['jobs']:self.store.upsert_job(job)
+        settings=self.settings();boards=settings['boards'][:]
+        keys={(b['provider'],b['slug']) for b in boards}
+        for board in result['boards']:
+            if (board['provider'],board['slug']) not in keys and len(boards)<100:
+                boards.append(board);keys.add((board['provider'],board['slug']))
+        settings['boards']=boards;self.store.set('settings',settings)
+        report={k:v for k,v in result.items() if k!='jobs'}
+        report.update(created=now(),jobs=len(result['jobs']))
+        self.store.set('last_discovery',report)
+        self.store.event('discovery',f'Discovered {len(result["jobs"])} postings; checked {len(result["sources"])} source responses')
+        return report
+
     def prepare(self,jid):
         j=self.store.job(jid); p=self.profile(); s=self.settings()
-        packet=build_packet(self.store.directory,p,j,s['model'],s['use_ai'])
+        packet=build_packet(self.store.directory,p,j,s['model'],s['use_ai'],structured=s['structured_tailoring'])
         if j['status'] in ('new','prepared','queued'): self.store.status(jid,'prepared')
         self.store.event('prepared',f'Prepared an evidence-based resume for {j["company"]}',jid)
         return packet
@@ -184,16 +217,33 @@ class Service:
         if not p['verified']: raise ValueError('Verify your profile before automatic applications')
         if job['status'] not in ('new','prepared','queued','needs_input'): raise ValueError('This job cannot be automatically submitted in its current state')
         # Fetch authoritative feed immediately before sending; do not apply from stale snapshots.
-        if not job.get('board'):
+        if not job.get('board') and not job.get('verified_public_posting'):
             self.store.status(jid,'needs_input')
             raise ValueError('Imported jobs require manual application. Automatic submission requires a supported company feed.')
-        live=fetch_board({'provider':job['source'],'slug':job['board'],'company':job['company']})
-        fresh=next((x for x in live if x['source_key']==job['source_key']),None)
+        if job.get('board'):
+            live=fetch_board({'provider':job['source'],'slug':job['board'],'company':job['company']})
+            fresh=next((x for x in live if x['source_key']==job['source_key']),None)
+        else:
+            fresh=refresh_public_job(job)
         if not fresh:
             self.store.status(jid,'closed'); raise ValueError('Job is no longer in the employer feed')
         fresh['id']=jid; self.store.upsert_job(fresh); job=self.store.job(jid)
         match=evaluate(p,job,s)
         if not match['eligible']: raise ValueError('; '.join(match['blockers']))
+        if s['use_ai']:
+            from .assessment import assess
+            from .resume import fingerprint
+            signature=fingerprint(p,job)+':'+s['model']
+            assessment=self.store.get('assessment:'+jid,{})
+            if assessment.get('signature')!=signature:
+                try:assessment=assess(p,job,s['model'])
+                except Exception:
+                    raise ValueError('Local fit review could not be validated; skipping this application')
+                assessment['signature']=signature
+                self.store.set('assessment:'+jid,assessment)
+            if assessment['fit']!='strong':
+                self.store.event('fit_rejected',assessment['reason'],jid)
+                raise ValueError('Local fit review: '+assessment['reason'])
         packet=self.prepare(jid)
         s=self.settings()
         if not s['auto_submit']: raise ValueError('Automatic submission was paused')
@@ -206,10 +256,18 @@ class Service:
         except Exception:
             state,detail='uncertain','Unexpected runner failure. Check employer portal before retrying.'
         self.store.finish(attempt,jid,state,detail)
+        if state=='needs_input':
+            questions=self.store.get('pending_questions',[])
+            if not any(q['job_id']==jid and q['detail']==detail for q in questions):
+                questions.append({'job_id':jid,'company':job['company'],'detail':detail,'created':now()})
+                self.store.set('pending_questions',questions[-100:])
         return {'status':state,'detail':detail}
 
     def cycle(self):
-        result={'sync':self.sync(),'applications':[]}
+        result={'applications':[]}
+        if self.settings()['discovery_enabled']:
+            result['discovery']=self.discover()
+        if self.settings()['boards']:result['sync']=self.sync()
         for job in self.ranked():
             if not self.settings()['auto_submit']: break
             if not job['match']['eligible'] or job['status'] not in ('new','prepared','queued'): continue
@@ -227,7 +285,7 @@ class Service:
         return result
 
     def task(self,kind,jid=None):
-        functions={'sync':self.sync,'cycle':self.cycle,'inbox':lambda:mailbox.poll(self.store),
+        functions={'discover':self.discover,'sync':self.sync,'cycle':self.cycle,'inbox':lambda:mailbox.poll(self.store),
                    'prepare':lambda:self.prepare(jid),'apply':lambda:self.apply(jid)}
         if kind not in functions: raise ValueError('Unknown task')
         if not self.lock.acquire(blocking=False): raise ValueError('Another task is running. You can still pause automation.')
