@@ -47,9 +47,10 @@ Open **http://127.0.0.1:4173**. No internet connection is required to run the in
 3. Choose among three deterministic alternatives. Generation from a chat brief needs room for a corridor with rooms on both sides; the older single-floor form path needs a buildable rectangle of at least 22 × 28 ft. Smaller rooms on constrained sites are flagged, not represented as professionally approved.
 4. Select a room in the plan or right-hand list. Drag it to move, or drag its green corner to resize on a half-foot grid. The inspector also supports precise width, depth, X/Y coordinates, name, flooring, door wall and position, and window position. Edits update the shared data model immediately. Room moves do not automatically resize neighbors; the checker flags overlaps.
 5. **Rooms** adds a room at the northwest corner for manual placement. **Furniture** adds a piece to the selected room. Its inspector controls X/Y position, 90-degree rotation, removal, and reset. **Materials** applies flooring to the selected room, or all rooms of the current floor if none is selected.
-6. **3D View** opens a real WebGL model: drag to orbit, scroll to zoom, and right-drag to pan. **Walkthrough** starts in the passage at eye level. Click the scene to capture the mouse, use WASD to move, and Escape to release. Arrow keys offer movement/turning without mouse capture. Walls and furniture block movement. Current 3D assets are locally generated geometric furniture, not third-party GLB models.
-7. Duplicate a floor with the plus in **Floors & levels** or **Duplicate this floor**. Each floor has separate rooms and height. Up to five floors are supported. The viewer shows the selected floor; it does not yet assemble a complete multi-storey building or connect floors with traversable stairs.
-8. Changes save automatically in this browser on this device. **Export → Project JSON** creates a portable backup; **Open project** imports it. **Floor plan SVG** exports the current 2D view. **Print / Save as PDF** uses the browser's print dialog. Undo/redo retains up to 40 edit snapshots for the session. Project naming is autosaved without individual undo entries.
+6. **3D View** opens a real WebGL model of the whole house, storey on storey, with the compound wall, gate, driveway, plinth, window chajjas and roof parapet. Drag to orbit, scroll to zoom, right-drag to pan. Orbiting cuts the building at the selected floor so you can look into it. **Walkthrough** starts at eye level: click the scene to capture the mouse, WASD to move, Escape to release; arrow keys move and turn without mouse capture. Walls and furniture block movement. **The staircase is real** - a dog-legged flight with treads, a half-landing and handrails - so you can climb from the stilt to the terrace, turning at each landing the way you would in the building. The floor selector follows you up. Current 3D assets are locally generated geometry, not third-party GLB models.
+7. **Elevations** shows straight-on orthographic views of all four faces, with storey lines and levels, windows and their chajjas, the terrace parapet, and the stilt drawn as open parking on piers. The road-facing one is marked. **Export → Elevations SVG** saves all four.
+8. Duplicate a floor with the plus in **Floors & levels** or **Duplicate this floor**. Each floor has separate rooms and height. Up to five floors are supported.
+9. Changes save automatically in this browser on this device. **Export → Project JSON** creates a portable backup; **Open project** imports it. **Floor plan SVG** exports the current 2D view. **Print / Save as PDF** uses the browser's print dialog. Undo/redo retains up to 40 edit snapshots for the session. Project naming is autosaved without individual undo entries.
 
 ## What the checks mean
 
@@ -57,7 +58,7 @@ Open **http://127.0.0.1:4173**. No internet connection is required to run the in
 - **Vastu:** the percentage of checked placements that match the built-in traditional room-zone table. Geographic north remains up regardless of road-facing direction. This is a transparent, limited rule set, not a claim of scientific or building-code compliance. Off mode displays no score; Strict generation only offers 100% matches and reports when the templates cannot meet all rules. Balanced mode exposes compromises. Strict is not a complete spatial solver.
 - **Area:** sum of room rectangles across floors, including passage; it is not a certified carpet-area, FAR/FSI, or gross construction-area calculation. Room rectangles represent conceptual wall centerline geometry, not guaranteed clear internal dimensions.
 - **Budget:** a stored target only, not a priced estimate. Modern Indian is currently the default descriptive style, not a material/style optimizer.
-- **Collision:** single-floor movement against wall sections and furniture bounding rectangles. Doors are actual wall openings and have lintels; windows have sills and transparent glass. Openings are shared between adjoining wall edges. Moving rooms or openings can disconnect access; the app does not yet solve or certify circulation and door approach clearances.
+- **Collision:** movement against wall sections and furniture bounding rectangles, plus the height underfoot on a staircase, which is what carries the walker between storeys. Doors are actual wall openings and have lintels; windows have sills and transparent glass. Openings are shared between adjoining wall edges. Moving rooms or openings can disconnect access; the app does not yet solve or certify circulation and door approach clearances.
 
 All plans are architectural **concepts**, not construction drawings. Structural systems, accessibility, local municipal rules, electrical/plumbing systems, door swings and furniture clearances need professional review.
 
@@ -73,11 +74,12 @@ There is no background daemon, telemetry, remote database, filesystem autosave, 
 - `src/layout.ts`: the layout solver. The corridor and staircase core are solved once from the site and reused on every level, so flights align and walls stack. Rooms are shared between the bands either side by tradition and by load, cut with a minimum run so a pooja room is not a ribbon, and en-suites are carved from their own bedroom.
 - `src/Chat.tsx`: the brief screen and the editable interpretation card.
 - `src/engine.ts`: project schema and floor roles; deterministic room allocation; furniture primitives placed relative to the door; shared doors/windows and segmented walls; Vastu scoring; geometry validation including ventilation and circulation; collision bounds; keyword parsing; guarded import with v1 migration.
-- `src/interiorScene.ts`: the Three.js scene - walls, openings, procedural furniture, and lighting.
+- `src/interiorScene.ts`: the Three.js scene. Each storey is built into its own group lifted to its height; between them run real dog-legged stairs, and around them the exterior envelope.
 - `src/materials.ts`: procedurally generated textures, plus one CC0 Poly Haven wood floor.
 - `src/presentation.ts`: camera viewpoints, moods, and palettes for the presentation mode.
 - `src/Plan.tsx`: editable SVG room plan, dimensions, landscaping, furniture symbols, door swings, and Vastu grid.
-- `src/Viewer.tsx`: lazy-loaded Three.js scene, procedural assets, lighting/shadows, orbit, mouse-look, keyboard walking, collision, and renderer disposal.
+- `src/Viewer.tsx`: lazy-loaded Three.js scene, orbit, mouse-look, keyboard walking, floor-aware collision, climbing between storeys, and renderer disposal.
+- `src/elevation.ts`: orthographic projection of each face into an SVG drawing.
 - `src/main.tsx`: studio UI, generation alternatives, room inspector, libraries, floor selection/duplication, undo/redo, import/export, local persistence, and dialog focus management.
 - `src/style.css`: responsive desktop/tablet/mobile workspace and print layout.
 
@@ -92,13 +94,20 @@ The engine suite exercises all 48 combinations of four orientations, 1–4 bedro
 
 The layout suite covers the brief pipeline without needing a model running: the guard against malformed or hostile model output, the repairs in `normalizeBrief`, and generation from a fixture of the worked brief - four levels with the right roles, a staircase core that stacks on every floor, en-suites that open off their own bedroom, no overlaps or setback crossings, every room reachable from the core, and no furniture parked across a doorway.
 
+The elevation suite checks that every storey appears at the height it actually sits, that openings stay inside the face they are drawn on, that the road-facing elevation is never a blank wall, and that a project name cannot inject markup into the drawing.
+
 To exercise the chat in a real browser, including a live extraction:
 
 ```sh
 .venv/bin/python tests/chat_smoke.py
 ```
 
-It skips the model call if Ollama is not running.
+It skips the model call if Ollama is not running. To check the whole house in 3D - orbiting each level, climbing the staircase from the stilt to the terrace, and rendering the elevations:
+
+```sh
+npx tsx tests/fixture.mts /tmp/house.json   # any generated project
+.venv/bin/python tests/multifloor_smoke.py /tmp/house.json
+```
 
 The optional browser regression script uses Python Playwright:
 
@@ -114,6 +123,6 @@ Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` only if using an already installed compatib
 
 ## Remaining roadmap
 
-Floors are generated, but the 3D viewer still shows one level at a time: it does not yet stack them into a single building, and the staircase is drawn in plan without traversable geometry, so you cannot walk from the stilt to the terrace. There is no exterior yet either - orbiting shows an open-top model rather than a facade.
+The house is generated floor by floor, stacked, walkable and drawn in elevation. What it is not yet: rooms are rectangles on a shared corridor frame, so it will not produce an L-shaped plan, a courtyard, a split level or a cut-out. Walls cannot be dragged independently of their rooms. Circulation is checked but door swings and furniture clearances are not solved. There is no lift or ramp, no roof form other than flat, no structural grid, and no cost estimate: the budget is a stored number.
 
-Next stages: stacked multi-floor 3D with real stair geometry and floor-to-floor walking; the building envelope (facade, parapet, sunshades, railings, boundary wall and gate) and orthographic elevation drawings; then constrained wall editing, door and furniture clearance solving, lift and ramp geometry, lighting/electrical/plumbing schedules, material cost estimation, project storage beyond browser localStorage, licensed GLB catalogs, and IFC/BIM/DXF import. There is no NestJS/PostgreSQL/Redis infrastructure because nothing here needs a remote service or a background render worker.
+Next: constrained wall editing, door-swing and clearance solving, non-rectangular plans and courtyards, lift and ramp geometry, lighting/electrical/plumbing schedules, material cost estimation, project storage beyond browser localStorage, licensed GLB catalogs, and IFC/BIM/DXF import. There is no NestJS/PostgreSQL/Redis infrastructure because nothing here needs a remote service or a background render worker.

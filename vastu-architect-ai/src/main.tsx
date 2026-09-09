@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import Chat from "./Chat";
+import { SIDES, elevationSvg } from "./elevation";
 import {
   ArrowUpRight,
   ArrowLeft,
@@ -119,7 +120,7 @@ function App() {
   const [project, setProject] = useState<Project>(initial.project),
     [level, setLevel] = useState(0),
     [selected, setSelected] = useState<string | null>(null),
-    [mode, setMode] = useState<"2d" | "3d" | "walk">("2d"),
+    [mode, setMode] = useState<"2d" | "3d" | "walk" | "elev">("2d"),
     [panel, setPanel] = useState("project"),
     [zoom, setZoom] = useState(1),
     [showFurniture, setShowFurniture] = useState(true),
@@ -403,6 +404,21 @@ function App() {
                 <button onClick={exportSvg}>
                   <Ruler size={15} />
                   Floor plan SVG
+                </button>
+                <button
+                  onClick={() => {
+                    for (const side of SIDES)
+                      download(
+                        `aangan-${side.toLowerCase()}-elevation.svg`,
+                        elevationSvg(project, side),
+                        "image/svg+xml",
+                      );
+                    setExportOpen(false);
+                    setToast("All four elevations were saved as SVG drawings.");
+                  }}
+                >
+                  <Square size={15} />
+                  Elevations SVG
                 </button>
                 <button
                   onClick={() => {
@@ -834,6 +850,7 @@ function App() {
                   { id: "2d", name: "2D Plan", icon: Grid2X2 },
                   { id: "3d", name: "3D View", icon: Box },
                   { id: "walk", name: "Walkthrough", icon: Footprints },
+                  { id: "elev", name: "Elevations", icon: Ruler },
                 ] as const
               ).map((v) => (
                 <button
@@ -875,29 +892,50 @@ function App() {
             </div>
           </div>
           <div className={`canvas ${mode}`}>
-            <div className="floor-picker">
-              <Layers size={14} />
-              <select
-                aria-label="Current floor"
-                value={Math.min(level, project.floors.length - 1)}
-                onChange={(e) => {
-                  setLevel(+e.target.value);
-                  setSelected(null);
-                }}
-              >
-                {project.floors.map((f, i) => (
-                  <option key={f.id} value={i}>
-                    {f.name}
-                  </option>
+            {mode !== "elev" && (
+              <div className="floor-picker">
+                <Layers size={14} />
+                <select
+                  aria-label="Current floor"
+                  value={Math.min(level, project.floors.length - 1)}
+                  onChange={(e) => {
+                    setLevel(+e.target.value);
+                    setSelected(null);
+                  }}
+                >
+                  {project.floors.map((f, i) => (
+                    <option key={f.id} value={i}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={13} />
+              </div>
+            )}
+            {mode !== "elev" && (
+              <div className="north-indicator">
+                <span>N</span>
+                <Compass size={38} strokeWidth={1} />
+              </div>
+            )}
+            {mode === "elev" ? (
+              <div className="elevations">
+                {SIDES.map((side) => (
+                  <figure key={side}>
+                    <div
+                      // Generated from the same model as the plans.
+                      dangerouslySetInnerHTML={{
+                        __html: elevationSvg(project, side),
+                      }}
+                    />
+                    <figcaption>
+                      {side} elevation
+                      {side === project.site.facing ? " · road side" : ""}
+                    </figcaption>
+                  </figure>
                 ))}
-              </select>
-              <ChevronDown size={13} />
-            </div>
-            <div className="north-indicator">
-              <span>N</span>
-              <Compass size={38} strokeWidth={1} />
-            </div>
-            {mode === "2d" ? (
+              </div>
+            ) : mode === "2d" ? (
               <Plan
                 project={project}
                 floor={floor}
@@ -988,7 +1026,9 @@ function App() {
                 ? "Click a room to edit · Drag to move · Corner handle to resize"
                 : mode === "3d"
                   ? "Drag to orbit · Scroll to zoom · Right-drag to pan"
-                  : "Explore your design at eye level"}
+                  : mode === "elev"
+                    ? "Straight-on views of each face · Export from the menu"
+                    : "Explore your design at eye level"}
             </div>
           </div>
           <div className="canvas-footer">
@@ -998,7 +1038,9 @@ function App() {
                 ? "Live floor plan"
                 : mode === "3d"
                   ? "Live 3D model"
-                  : "First-person view"}
+                  : mode === "elev"
+                    ? "Orthographic elevations"
+                    : "First-person view"}
               <span className="footer-divider">|</span>Units: feet
             </span>
             <span>
@@ -1259,9 +1301,10 @@ function App() {
                   <div>
                     <strong>
                       {
-                        project.floors.flatMap((f) => f.rooms).filter((r) =>
-                          ["bedroom", "master"].includes(r.type),
-                        ).length
+                        project.floors
+                          .flatMap((f) => f.rooms)
+                          .filter((r) => ["bedroom", "master"].includes(r.type))
+                          .length
                       }
                     </strong>
                     <span>Bedrooms</span>
@@ -1634,9 +1677,7 @@ function App() {
                           requirements: {
                             ...draft.requirements,
                             vastu: e.target.value as
-                              | "Strict"
-                              | "Balanced"
-                              | "Off",
+                              "Strict" | "Balanced" | "Off",
                           },
                         })
                       }

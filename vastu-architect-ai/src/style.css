@@ -2821,3 +2821,41 @@ section {
     min-width: 108px;
   }
 }
+
+/* ---- Elevation drawings --------------------------------------------- */
+.elevations {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: min-content;
+  gap: 18px;
+  padding: 22px;
+  overflow: auto;
+  height: 100%;
+  align-content: start;
+  background: #f6f5ef;
+}
+.elevations figure {
+  margin: 0;
+  background: #fffefa;
+  border: 1px solid #e5e9db;
+  border-radius: 11px;
+  padding: 12px 12px 6px;
+  overflow: hidden;
+}
+.elevations svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.elevations figcaption {
+  padding: 7px 2px 4px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #7c866f;
+}
+@media (max-width: 900px) {
+  .elevations {
+    grid-template-columns: 1fr;
+  }
+}

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import {
   floorBase,
+  floorBounds,
   stairRun,
   getWalls,
   getOpenings,
@@ -568,6 +569,111 @@ export function buildInterior(
           seat.position.set(0, 1.36, 0.25);
           g.add(seat);
           c(0, 1.35, 0.25, 0.4, 0.02, m.black);
+        } else if (f.kind === "car") {
+          const body = mats.standard({
+            color: "#9aa3a6",
+            roughness: 0.35,
+            metalness: 0.6,
+          });
+          b(0, 1.55, 0, f.w, 1.5, f.d * 0.96, body, 0.55);
+          b(0, 2.65, -f.d * 0.03, f.w * 0.86, 1.1, f.d * 0.5, m.glass, 0.45);
+          b(0, 3.1, -f.d * 0.03, f.w * 0.8, 0.3, f.d * 0.46, body, 0.3);
+          for (const sx of [-1, 1])
+            for (const sz of [-0.32, 0.34]) {
+              const wheel = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.95, 0.95, 0.55, 18),
+                m.black,
+              );
+              geometries.add(wheel.geometry);
+              wheel.rotation.z = Math.PI / 2;
+              wheel.position.set(sx * (f.w / 2 - 0.1), 0.85, sz * f.d);
+              wheel.castShadow = true;
+              g.add(wheel);
+            }
+          for (const sx of [-0.62, 0.62])
+            b(sx * f.w, 1.85, -f.d / 2 + 0.1, 0.7, 0.4, 0.14, m.light, 0.07);
+        } else if (f.kind === "recliner") {
+          b(0, 0.85, 0, f.w * 0.92, 1.1, f.d * 0.9, m.fabric, 0.3);
+          b(0, 1.9, f.d / 2 - 0.42, f.w * 0.92, 2, 0.72, m.fabric, 0.3);
+          for (const sx of [-1, 1])
+            b(sx * (f.w / 2 - 0.2), 1.6, 0, 0.34, 1, f.d * 0.86, m.accent, 0.16);
+          b(0, 1.3, -f.d / 2 - 0.18, f.w * 0.5, 0.3, 0.7, m.fabric, 0.14);
+        } else if (f.kind === "screen") {
+          b(0, 5.1, 0, f.w, 3.4, 0.18, m.black, 0.05);
+          const face = mats.standard({
+            color: "#11161a",
+            roughness: 0.28,
+            metalness: 0.1,
+          });
+          b(0, 5.1, -0.11, f.w - 0.3, 3.1, 0.03, face);
+        } else if (f.kind === "planter") {
+          b(0, 0.85, 0, f.w, 1.7, f.d, m.terracotta, 0.24);
+          b(0, 1.72, 0, f.w - 0.16, 0.09, f.d - 0.16, m.trim);
+          for (let i = 0; i < 5; i++) {
+            const leaf = sphere(
+              (i % 3) * 0.5 - 0.5,
+              2.1 + (i % 2) * 0.42,
+              ((i % 2) - 0.5) * 0.5,
+              0.62,
+              m.leaf,
+              g,
+            );
+            leaf.scale.set(1, 0.42, 0.85);
+          }
+        } else if (f.kind === "bench") {
+          b(0, 1.28, 0, f.w, 0.22, f.d * 0.85, m.wood, 0.07);
+          for (const sx of [-1, 1])
+            b(sx * (f.w / 2 - 0.35), 0.62, 0, 0.22, 1.3, f.d * 0.7, m.darkwood);
+          b(0, 2.1, f.d / 2 - 0.2, f.w, 1.4, 0.16, m.wood, 0.06);
+        } else if (f.kind === "washer") {
+          b(0, 1.65, 0, f.w * 0.92, 3.1, f.d * 0.92, m.white, 0.12);
+          const door = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.62, 0.62, 0.14, 24),
+            m.glass,
+          );
+          geometries.add(door.geometry);
+          door.rotation.x = Math.PI / 2;
+          door.position.set(0, 1.85, -f.d / 2 + 0.42);
+          g.add(door);
+          b(0, 3.05, -f.d / 2 + 0.3, f.w * 0.7, 0.24, 0.1, m.black, 0.04);
+        } else if (f.kind === "shower") {
+          b(0, 0.06, 0, f.w, 0.12, f.d, m.stone);
+          for (const [dx, dz, w, d] of [
+            [0, -f.d / 2, f.w, 0.05],
+            [-f.w / 2, 0, 0.05, f.d],
+          ] as const) {
+            const pane = b(dx, 3.6, dz, w, 7, d, m.glass);
+            pane.castShadow = false;
+          }
+          c(f.w / 2 - 0.5, 4.2, f.d / 2 - 0.5, 0.06, 3.2, m.brass);
+          const head = c(f.w / 2 - 0.5, 5.85, f.d / 2 - 1.1, 0.42, 0.1, m.brass);
+          head.rotation.x = 0.25;
+        } else if (f.kind === "pergola") {
+          for (const sx of [-1, 1])
+            for (const sz of [-1, 1])
+              c(
+                (sx * (f.w - 0.6)) / 2,
+                4,
+                (sz * (f.d - 0.6)) / 2,
+                0.16,
+                8,
+                m.darkwood,
+              );
+          for (const sz of [-1, 1])
+            b(0, 8.1, (sz * (f.d - 0.6)) / 2, f.w, 0.3, 0.26, m.darkwood);
+          const slats = Math.max(3, Math.round(f.d / 1.5));
+          for (let i = 0; i < slats; i++) {
+            const beam = b(
+              0,
+              8.35,
+              -f.d / 2 + 0.4 + (i * (f.d - 0.8)) / (slats - 1),
+              f.w + 0.5,
+              0.16,
+              0.42,
+              m.wood,
+            );
+            beam.castShadow = true;
+          }
         } else {
           b(0, 1.25, 0, f.w, 2.5, f.d, m.wood);
           b(0, 2.55, 0, f.w + 0.1, 0.1, f.d + 0.1, m.stone);
@@ -760,8 +866,184 @@ export function buildInterior(
       }
     }
   };
+  /** Everything you see from outside: the plinth the house sits on, the
+   *  sunshades over its windows, the coping on the roof parapet, the box
+   *  over the stair head, and the compound wall with its gate. */
+  const buildExterior = () => {
+    root = scene;
+    const total = p.floors.reduce((sum, f) => sum + f.height, 0);
+    const plaster = mats.standard({ color: "#efece2", roughness: 0.88 }),
+      coping = mats.standard({ color: "#ded8c9", roughness: 0.7 }),
+      drive = mats.standard({ color: "#bdbcb2", roughness: 0.9 });
+    const rect = p.floors[0] ? floorBounds(p.floors[0]) : null;
+    if (rect) {
+      // A plinth lifts the house off the ground, as a house on a plot is.
+      box(
+        (rect.minX + rect.maxX) / 2,
+        -0.35,
+        (rect.minY + rect.maxY) / 2,
+        rect.maxX - rect.minX + 1.4,
+        0.9,
+        rect.maxY - rect.minY + 1.4,
+        coping,
+      );
+    }
+    // A chajja over every window, which is what keeps an Indian facade in
+    // shade and gives it its horizontal lines.
+    for (const [i, f] of p.floors.entries()) {
+      if (f.role === "terrace") continue;
+      // Into the level's own group, so a sunshade hides with its storey.
+      root = levels[i].group;
+      const b = floorBounds(f),
+        base = 0;
+      for (const o of getOpenings(p, f)) {
+        if (o.kind !== "window") continue;
+        const onWest = o.axis === "v" && Math.abs(o.fixed - b.minX) < 0.03,
+          onEast = o.axis === "v" && Math.abs(o.fixed - b.maxX) < 0.03,
+          onNorth = o.axis === "h" && Math.abs(o.fixed - b.minY) < 0.03,
+          onSouth = o.axis === "h" && Math.abs(o.fixed - b.maxY) < 0.03;
+        if (!onWest && !onEast && !onNorth && !onSouth) continue;
+        const out = onWest ? -1 : onEast ? 1 : onNorth ? -1 : 1;
+        const len = o.end - o.start + 1.6,
+          reach = 1.5;
+        const cx = o.axis === "h" ? (o.start + o.end) / 2 : o.fixed + (out * reach) / 2,
+          cz = o.axis === "h" ? o.fixed + (out * reach) / 2 : (o.start + o.end) / 2;
+        box(
+          cx,
+          base + 7.35,
+          cz,
+          o.axis === "h" ? len : reach,
+          0.3,
+          o.axis === "h" ? reach : len,
+          coping,
+        );
+      }
+    }
+    root = scene;
+    const roof = p.floors[p.floors.length - 1];
+    if (roof) {
+      root = levels[p.floors.length - 1].group;
+      const base = 0;
+      const b = floorBounds(roof);
+      if (roof.role === "terrace") {
+        // Coping along the top of the parapet.
+        for (const [axis, fixed, from, to] of [
+          ["h", b.minY, b.minX, b.maxX],
+          ["h", b.maxY, b.minX, b.maxX],
+          ["v", b.minX, b.minY, b.maxY],
+          ["v", b.maxX, b.minY, b.maxY],
+        ] as const)
+          box(
+            axis === "h" ? (from + to) / 2 : fixed,
+            base + 3.6,
+            axis === "h" ? fixed : (from + to) / 2,
+            axis === "h" ? to - from + 0.9 : 0.9,
+            0.22,
+            axis === "h" ? 0.9 : to - from + 0.9,
+            coping,
+          );
+      }
+      // A flat roof over the stair head, so the house is capped.
+      const head = roof.rooms.find((r) => r.type === "stairs");
+      if (head)
+        box(
+          head.x + head.w / 2,
+          base + roof.height + 0.3,
+          head.y + head.d / 2,
+          head.w + 1.2,
+          0.5,
+          head.d + 1.2,
+          coping,
+        );
+    }
+    // The compound wall belongs to the site, not to any one storey.
+    root = scene;
+    const gateAt = { x: p.site.width / 2, z: p.site.depth / 2 };
+    const road = p.site.facing;
+    const edges = [
+      ["h", 0, 0, p.site.width, road === "North"],
+      ["h", p.site.depth, 0, p.site.width, road === "South"],
+      ["v", 0, 0, p.site.depth, road === "West"],
+      ["v", p.site.width, 0, p.site.depth, road === "East"],
+    ] as const;
+    for (const [axis, fixed, from, to, isRoad] of edges) {
+      const gap = isRoad ? 9 : 0,
+        centre = axis === "h" ? gateAt.x : gateAt.z;
+      const runs: [number, number][] = gap
+        ? [
+            [from, centre - gap / 2],
+            [centre + gap / 2, to],
+          ]
+        : [[from, to]];
+      for (const [a, c] of runs) {
+        if (c - a < 0.2) continue;
+        box(
+          axis === "h" ? (a + c) / 2 : fixed,
+          2.25,
+          axis === "h" ? fixed : (a + c) / 2,
+          axis === "h" ? c - a : 0.55,
+          4.5,
+          axis === "h" ? 0.55 : c - a,
+          plaster,
+        );
+      }
+      if (!isRoad) continue;
+      // Gate piers and a slatted leaf between them.
+      for (const side of [-1, 1])
+        box(
+          axis === "h" ? centre + (side * gap) / 2 : fixed,
+          3,
+          axis === "h" ? fixed : centre + (side * gap) / 2,
+          axis === "h" ? 1.1 : 1.1,
+          6,
+          1.1,
+          plaster,
+        );
+      for (let i = 0; i < 11; i++) {
+        const at = centre - gap / 2 + 0.8 + (i * (gap - 1.6)) / 10;
+        box(
+          axis === "h" ? at : fixed,
+          2.3,
+          axis === "h" ? fixed : at,
+          axis === "h" ? 0.16 : 0.3,
+          4.4,
+          axis === "h" ? 0.3 : 0.16,
+          m.black,
+        );
+      }
+      // The apron runs from the gate to the face of the house, not under it.
+      if (!rect) continue;
+      const near =
+        road === "North"
+          ? rect.minY
+          : road === "South"
+            ? p.site.depth - rect.maxY
+            : road === "West"
+              ? rect.minX
+              : p.site.width - rect.maxX;
+      const span = Math.max(1, near + 0.6);
+      const mid =
+        road === "North"
+          ? span / 2
+          : road === "South"
+            ? p.site.depth - span / 2
+            : road === "West"
+              ? span / 2
+              : p.site.width - span / 2;
+      box(
+        axis === "h" ? gateAt.x : mid,
+        -0.16,
+        axis === "h" ? mid : gateAt.z,
+        axis === "h" ? gap + 2 : span,
+        0.24,
+        axis === "h" ? span : gap + 2,
+        drive,
+      );
+    }
+  };
   for (const [i, floor] of p.floors.entries())
     buildLevel(floor, floorBase(p, i), i);
+  buildExterior();
   return {
     mats,
     levels,

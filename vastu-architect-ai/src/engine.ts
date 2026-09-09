@@ -467,9 +467,17 @@ export function getOpenings(p: Project, f: Floor): Opening[] {
     push(r, r.doorSide, r.doorOffset, 3, "door");
     if (r.type === "hall") continue;
     // Every enclosed room gets a window on an exterior edge it actually
-    // touches, preferring an edge that is not already carrying its door.
+    // touches. The road-facing edge wins where a room reaches it, so the
+    // front of the house has openings rather than a blank wall; otherwise
+    // any edge that is not already carrying the door.
     const exterior = exteriorSides(r, { minX, maxX, minY, maxY });
-    const side = exterior.find((s) => s !== r.doorSide) ?? exterior[0];
+    const front = (
+      { North: "n", South: "s", East: "e", West: "w" } as const
+    )[p.site.facing];
+    const ranked = [...exterior].sort(
+      (a, b) => Number(b === front) - Number(a === front),
+    );
+    const side = ranked.find((s) => s !== r.doorSide) ?? ranked[0];
     if (side)
       push(
         r,

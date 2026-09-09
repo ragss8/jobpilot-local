@@ -321,3 +321,57 @@ test("a brief round-trips through the project guard unchanged", () => {
 });
 const _unused: Brief | null = null;
 void _unused;
+
+import { SIDES, elevation, elevationSvg } from "../src/elevation.ts";
+test("an elevation shows every storey at the height it actually sits", () => {
+  const p = generateFromBrief(site(), brief(), 0);
+  for (const side of SIDES) {
+    const e = elevation(p, side);
+    assert.equal(e.storeys.length, p.floors.length, side);
+    assert.equal(
+      e.total,
+      p.floors.reduce((s, f) => s + f.height, 0),
+      side,
+    );
+    e.storeys.forEach((s, i) => {
+      assert.equal(s.base, floorBase(p, i), `${side} ${s.name}`);
+      assert.ok(s.to > s.from, "a face has width");
+    });
+    // The stilt reads as open, the roof carries a parapet.
+    assert.equal(e.storeys[0].open, true);
+    assert.equal(e.storeys[e.storeys.length - 1].parapet, true);
+  }
+});
+test("the road-facing elevation is not a blank wall", () => {
+  for (const facing of ["North", "East", "South", "West"] as Direction[]) {
+    const b = brief();
+    b.site.facing = facing;
+    const p = generateFromBrief(site(), b, 0);
+    const front = elevation(p, facing);
+    const windows = front.storeys.reduce(
+      (n, s) => n + s.bands.filter((x) => x.kind === "window").length,
+      0,
+    );
+    assert.ok(windows > 0, `${facing}-facing house should have front windows`);
+  }
+});
+test("openings sit within the face they are drawn on", () => {
+  const p = generateFromBrief(site(), brief(), 0);
+  for (const side of SIDES) {
+    const e = elevation(p, side);
+    for (const s of e.storeys)
+      for (const band of s.bands) {
+        assert.ok(band.u >= s.from - 0.05 && band.u + band.w <= s.to + 0.05);
+        assert.ok(band.top <= s.height, "an opening fits inside its storey");
+      }
+  }
+});
+test("elevation SVG is self-contained and escapes the project name", () => {
+  const p = generateFromBrief(site(), brief(), 0);
+  p.name = 'Ram & Sons <script>alert("x")</script>';
+  const svg = elevationSvg(p, "North");
+  assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+  assert.match(svg, /North elevation/);
+  assert.ok(!svg.includes("<script>"), "markup in a name must not survive");
+  assert.ok(svg.includes("Ram &amp; Sons"));
+});

@@ -127,5 +127,18 @@ with sync_playwright() as pw:
     assert levels_seen == set(range(top + 1)), f"skipped a storey: {sorted(levels_seen)}"
     print("climbed the whole house, stilt to terrace", flush=True)
     page.screenshot(path=str(art / "mf-walk-end.png"))
+    # Elevations are generated from the same model as the plans.
+    page.get_by_role("button", name="2D Plan", exact=True).click()
+    page.get_by_role("button", name="Elevations", exact=True).click()
+    expect(page.locator(".elevations figure").first).to_be_visible(timeout=15_000)
+    figures = page.locator(".elevations figure").count()
+    assert figures == 4, f"expected four elevations, got {figures}"
+    fronts = page.locator(".elevations figcaption", has_text="road side").count()
+    assert fronts == 1, "the road-facing elevation should be marked"
+    page.wait_for_timeout(500)
+    page.screenshot(path=str(art / "mf-elevations.png"))
+    print("elevations rendered:", figures, flush=True)
+
     assert not errors, errors
+    print("OK", flush=True)
     browser.close()

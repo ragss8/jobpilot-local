@@ -227,7 +227,8 @@ export default function Viewer({
     controls.maxDistance = 200;
     controls.maxPolarAngle = Math.PI / 2 - 0.02;
     const frame = () => {
-      const reach = Math.max(p.site.width, p.site.depth, storeys * 1.2);
+      // Wide enough to take in the compound wall as well as the house.
+      const reach = Math.max(p.site.width, p.site.depth, storeys * 1.2) * 1.12;
       controls.target.set(p.site.width / 2, storeys * 0.42, p.site.depth / 2);
       camera.position.set(
         p.site.width / 2 + reach * 0.95,
