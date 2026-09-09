@@ -29,6 +29,8 @@ import {
   type Floor,
   type Room,
   type Material,
+  floorBase,
+  stairHeightAt,
 } from "./engine";
 import {
   initialRoom,
@@ -38,7 +40,9 @@ import {
   type Palette,
 } from "./presentation";
 import { buildInterior } from "./interiorScene";
+const EYE = 5.35;
 interface Runtime {
+  setLevel: (index: number) => void;
   navigate: (id: string) => boolean;
   setWalk: (walk: boolean) => void;
   setMood: (mood: Mood) => void;
@@ -96,7 +100,7 @@ export default function Viewer({
   paletteRef.current = palette;
   lightsRef.current = lights;
   const current =
-      floor.rooms.find((r) => r.id === activeRoom) ?? initialRoom(p, floor),
+    floor.rooms.find((r) => r.id === activeRoom) ?? initialRoom(p, floor),
     rooms = floor.rooms.filter((r) => r.type !== "hall");
   const go = (id: string) => {
     if (runtime.current?.navigate(id)) {
@@ -135,6 +139,11 @@ export default function Viewer({
   useEffect(() => {
     runtime.current?.setWalk(walk);
   }, [walk]);
+  useEffect(() => {
+    // Changing storey moves the viewer rather than rebuilding the scene, so
+    // the whole house stays loaded and the walk can carry on.
+    runtime.current?.setLevel(p.floors.findIndex((f) => f.id === floor.id));
+  }, [floor, p.floors]);
   useEffect(() => {
     runtime.current?.setMood(mood);
   }, [mood]);
@@ -196,7 +205,8 @@ export default function Viewer({
     scene.add(sun, sun.target);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    const span = Math.max(p.site.width, p.site.depth) + 15;
+    const storeys = p.floors.reduce((sum, f) => sum + f.height, 0);
+    const span = Math.max(p.site.width, p.site.depth, storeys) + 15;
     Object.assign(sun.shadow.camera, {
       left: -span,
       right: span,
@@ -208,7 +218,7 @@ export default function Viewer({
     sun.shadow.bias = -0.00008;
     sun.shadow.normalBias = 0.02;
     sun.shadow.radius = 3;
-    const model = buildInterior(scene, renderer, p, floor, showFurniture);
+    const model = buildInterior(scene, renderer, p, showFurniture);
     model.mats.setPalette(paletteRef.current);
     model.setLights(lightsRef.current);
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -216,14 +226,41 @@ export default function Viewer({
     controls.minDistance = 6;
     controls.maxDistance = 200;
     controls.maxPolarAngle = Math.PI / 2 - 0.02;
-    controls.target.set(p.site.width / 2, 2, p.site.depth / 2);
-    camera.position.set(
-      p.site.width * 1.4,
-      Math.max(p.site.width, p.site.depth) * 0.94,
-      p.site.depth * 1.4,
+    const frame = () => {
+      const reach = Math.max(p.site.width, p.site.depth, storeys * 1.2);
+      controls.target.set(p.site.width / 2, storeys * 0.42, p.site.depth / 2);
+      camera.position.set(
+        p.site.width / 2 + reach * 0.95,
+        storeys * 0.75 + reach * 0.55,
+        p.site.depth / 2 + reach * 1.05,
+      );
+      controls.update();
+    };
+    frame();
+    /** Which storey the walker is on. Movement changes it by climbing, so it
+     *  is tracked here and reported outward rather than driven by the prop. */
+    let level = Math.max(
+      0,
+      p.floors.findIndex((f) => f.id === floor.id),
     );
-    controls.update();
-    const walls = getWalls(p, floor);
+    let walkerY = floorBase(p, level);
+    const wallCache = new Map<number, ReturnType<typeof getWalls>>();
+    const wallsOf = (i: number) => {
+      if (!wallCache.has(i)) wallCache.set(i, getWalls(p, p.floors[i]));
+      return wallCache.get(i)!;
+    };
+    const bare = new Map<number, Floor>();
+    const floorOf = (i: number) => {
+      if (showFurniture) return p.floors[i];
+      if (!bare.has(i))
+        bare.set(i, {
+          ...p.floors[i],
+          rooms: p.floors[i].rooms.map((r) => ({ ...r, furniture: [] })),
+        });
+      return bare.get(i)!;
+    };
+    const coreOf = (i: number) =>
+      p.floors[i]?.rooms.find((r) => r.type === "stairs");
     let walking = walkRef.current,
       yaw = 0,
       pitch = -0.035,
@@ -231,31 +268,65 @@ export default function Viewer({
       lastPosition = 0,
       previous = performance.now();
     const keys = new Set<string>();
-    const valid = (x: number, z: number) =>
-      canWalk(
-        x,
-        z,
-        p,
-        showFurniture
-          ? floor
-          : {
-              ...floor,
-              rooms: floor.rooms.map((r) => ({ ...r, furniture: [] })),
-            },
-        walls,
-      ) &&
+    const valid = (x: number, z: number, i = level) =>
+      canWalk(x, z, p, floorOf(i), wallsOf(i)) &&
       !model.obstacles.some(
         (b) =>
+          b.level === i &&
           x > b.x - 0.62 &&
           x < b.x + b.w + 0.62 &&
           z > b.z - 0.62 &&
           z < b.z + b.d + 0.62,
       );
+    /** Height of whatever is underfoot at a point: the storey's own floor, or
+     *  a tread of the flight running through the core. Two flights can pass
+     *  over the same spot, so the one nearest the walker wins. */
+    const supportAt = (x: number, z: number, from: number) => {
+      let best = floorBase(p, level),
+        bestGap = Infinity;
+      const consider = (i: number) => {
+        const storey = p.floors[i],
+          core = storey && coreOf(i);
+        if (!core) return;
+        const h = stairHeightAt(core, storey.height, x, z);
+        if (h === null) return;
+        // Without a storey above there is no flight, only the landing you
+        // arrive on, so nothing higher than the floor is standable.
+        if (!p.floors[i + 1] && h > 0.01) return;
+        const y = floorBase(p, i) + h;
+        const gap = Math.abs(y - from);
+        if (gap < bestGap) {
+          bestGap = gap;
+          best = y;
+        }
+      };
+      // The storey below reaches up through the well, and the one above
+      // owns the landing you step out on to at the top of the flight.
+      consider(level - 1);
+      consider(level);
+      consider(level + 1);
+      // A flight is only reachable from close to it; otherwise stay on this
+      // floor rather than snapping to a step overhead.
+      return bestGap <= 2.2 ? best : floorBase(p, level);
+    };
+    /** What you can see. Walking through the house shows every storey with
+     *  its ceiling on. Orbiting cuts the building at the selected floor, so
+     *  you look down into it instead of at the roof. */
+    const showLevels = () => {
+      model.setVisible((l) => walking || l.index <= level);
+      model.setCeilings((l) => walking && l.index <= level);
+    };
+    /** Settle on the storey whose floor the walker is standing at or above. */
+    const settleLevel = () => {
+      while (level + 1 < p.floors.length && walkerY >= floorBase(p, level + 1) - 0.06)
+        level++;
+      while (level > 0 && walkerY < floorBase(p, level) - 0.06) level--;
+    };
     const setWalk = (next: boolean) => {
       if (next === walking) return;
       walking = next;
       controls.enabled = !next;
-      model.ceilings.visible = next;
+      showLevels();
       keys.clear();
       if (next) {
         const r = initialRoom(p, floor);
@@ -264,28 +335,29 @@ export default function Viewer({
         if (document.pointerLockElement === renderer.domElement)
           document.exitPointerLock();
         camera.fov = 48;
-        camera.position.set(
-          p.site.width * 1.4,
-          Math.max(p.site.width, p.site.depth) * 0.94,
-          p.site.depth * 1.4,
-        );
-        controls.target.set(p.site.width / 2, 2, p.site.depth / 2);
-        controls.update();
+        frame();
         camera.updateProjectionMatrix();
       }
     };
     const navigate = (id: string) => {
-      const r = floor.rooms.find((r) => r.id === id);
-      if (!r) return false;
-      let view = roomView(p, floor, r);
+      const at = p.floors.findIndex((f) => f.rooms.some((r) => r.id === id));
+      if (at < 0) return false;
+      const target = p.floors[at];
+      const r = target.rooms.find((r) => r.id === id)!;
+      let view = roomView(p, target, r);
       if (!view) return false;
-      if (!valid(view.x, view.z)) {
+      if (level !== at) {
+        level = at;
+        walkerY = floorBase(p, at);
+        onFloorChange?.(at);
+      }
+      if (!valid(view.x, view.z, at)) {
         let found = false;
         for (let v = 0.82; v > 0.1 && !found; v -= 0.13)
           for (let u = 0.82; u > 0.1 && !found; u -= 0.13) {
             const x = r.x + r.w * u,
               z = r.y + r.d * v;
-            if (valid(x, z)) {
+            if (valid(x, z, at)) {
               view = {
                 ...view,
                 x,
@@ -299,10 +371,11 @@ export default function Viewer({
       }
       walking = true;
       controls.enabled = false;
-      model.ceilings.visible = true;
       camera.fov = 58;
       camera.updateProjectionMatrix();
-      camera.position.set(view.x, 5.35, view.z);
+      walkerY = floorBase(p, level);
+      showLevels();
+      camera.position.set(view.x, walkerY + EYE, view.z);
       yaw = view.yaw;
       pitch = view.pitch;
       camera.rotation.set(pitch, yaw, 0, "YXZ");
@@ -353,12 +426,14 @@ export default function Viewer({
       pitch = old.pitch;
       controls.target.copy(old.target);
       controls.enabled = !walking;
-      model.ceilings.visible = walking;
+      walkerY = old.y - EYE;
+      settleLevel();
+      showLevels();
       if (walking) camera.rotation.set(pitch, yaw, 0, "YXZ");
       else controls.update();
     } else if (walking) {
-      navigate(initialRoom(p, floor).id);
-    } else model.ceilings.visible = false;
+      navigate(initialRoom(p, p.floors[level]).id);
+    } else showLevels();
     const capture = () => {
       renderer.render(scene, camera);
       renderer.domElement.toBlob((blob) => {
@@ -390,6 +465,13 @@ export default function Viewer({
       }
     };
     runtime.current = {
+      setLevel: (i: number) => {
+        if (i === level || !p.floors[i]) return;
+        level = i;
+        walkerY = floorBase(p, i);
+        showLevels();
+        if (walking) navigate(initialRoom(p, p.floors[i]).id);
+      },
       navigate,
       setWalk,
       setMood,
@@ -478,8 +560,8 @@ export default function Viewer({
         if (keys.has("ArrowLeft")) yaw += dt * 1.1;
         if (keys.has("ArrowRight")) yaw -= dt * 1.1;
         let forward =
-            Number(keys.has("KeyW") || keys.has("ArrowUp")) -
-            Number(keys.has("KeyS") || keys.has("ArrowDown")),
+          Number(keys.has("KeyW") || keys.has("ArrowUp")) -
+          Number(keys.has("KeyS") || keys.has("ArrowDown")),
           side = Number(keys.has("KeyD")) - Number(keys.has("KeyA"));
         const length = Math.hypot(forward, side) || 1;
         forward /= length;
@@ -490,11 +572,39 @@ export default function Viewer({
           camera.position.x += dx;
         if (valid(camera.position.x, camera.position.z + dz))
           camera.position.z += dz;
+        // Follow whatever is underfoot, easing on to it so a flight reads as
+        // a climb rather than a series of jumps.
+        const support = supportAt(
+          camera.position.x,
+          camera.position.z,
+          walkerY,
+        );
+        walkerY += (support - walkerY) * Math.min(1, dt * 12);
+        const before = level;
+        settleLevel();
+        if (level !== before) {
+          showLevels();
+          onFloorChange?.(level);
+          lastRoom = "";
+        }
+        camera.position.y = walkerY + EYE;
         camera.rotation.set(pitch, yaw, 0, "YXZ");
         if (now - lastPosition > 150) {
           lastPosition = now;
           setPosition({ x: camera.position.x, z: camera.position.z, yaw });
-          const room = floor.rooms.find(
+          // Development only: lets the browser tests observe the walker
+          // climbing, which is not otherwise visible from the DOM.
+          if (import.meta.env.DEV)
+            (window as unknown as Record<string, unknown>).__aangan = {
+              x: camera.position.x,
+              y: camera.position.y,
+              z: camera.position.z,
+              walkerY,
+              level,
+              yaw,
+              walking,
+            };
+          const room = p.floors[level].rooms.find(
             (r) =>
               camera.position.x >= r.x &&
               camera.position.x <= r.x + r.w &&
@@ -511,7 +621,7 @@ export default function Viewer({
     });
     return () => {
       savedView.current = {
-        floor: floor.id,
+        floor: p.floors[level]?.id ?? floor.id,
         x: camera.position.x,
         z: camera.position.z,
         y: camera.position.y,
@@ -541,7 +651,7 @@ export default function Viewer({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [p, floor, showFurniture]);
+  }, [p, showFurniture]);
   return (
     <div
       className={`archviz ${present ? "presenting" : ""} ${walk ? "walking" : "orbiting"}`}

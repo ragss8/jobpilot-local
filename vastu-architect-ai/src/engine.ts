@@ -583,6 +583,69 @@ export function getWalls(p: Project, f: Floor): Wall[] {
   }
   return walls;
 }
+/** A dog-legged flight inside the core: one run up to a half-landing, a turn,
+ *  and a second run back the other way. Solved once here so the geometry the
+ *  viewer draws and the height the walker climbs cannot disagree. */
+export interface StairRun {
+  /** The direction the flights run in. */
+  axis: "x" | "z";
+  /** Start of the core in that axis. */
+  from: number;
+  /** Depth of the arrival landing at the near end, level with this floor. */
+  arrival: number;
+  /** Length of each flight between the two landings. */
+  run: number;
+  /** Depth of the half-landing at the far end. */
+  landing: number;
+  /** Middle of the core across the run; the two flights sit either side. */
+  mid: number;
+  /** True when the first, ascending flight is on the far side of `mid`. */
+  upperSide: boolean;
+  steps: number;
+}
+export function stairRun(core: Room): StairRun {
+  // The flights run along whichever side matches the standard core depth.
+  const axis: "x" | "z" =
+    Math.abs(core.d - STAIR.d) <= Math.abs(core.w - STAIR.d) ? "z" : "x";
+  const span = axis === "z" ? core.d : core.w,
+    across = axis === "z" ? core.w : core.d;
+  const arrival = Math.min(3.5, span * 0.27),
+    landing = Math.min(3.5, span * 0.27);
+  // You should meet the first tread as you come through the door, so the
+  // climbing flight is the one on the door's side of the core.
+  const upperSide =
+    axis === "z" ? core.doorSide === "e" : core.doorSide === "s";
+  return {
+    axis,
+    from: axis === "z" ? core.y : core.x,
+    arrival,
+    landing,
+    run: span - arrival - landing,
+    mid: (axis === "z" ? core.x : core.y) + across / 2,
+    upperSide,
+    steps: 8,
+  };
+}
+/** Height above this level's floor for a point standing on the flight, or
+ *  null when the point is not over the core at all. Continuous from the
+ *  arrival landing, up to the half-landing, and back to the floor above. */
+export function stairHeightAt(
+  core: Room,
+  height: number,
+  x: number,
+  z: number,
+): number | null {
+  if (x < core.x || x > core.x + core.w || z < core.y || z > core.y + core.d)
+    return null;
+  const s = stairRun(core);
+  const along = s.axis === "z" ? z : x,
+    across = s.axis === "z" ? x : z;
+  const t = (along - s.from - s.arrival) / s.run;
+  if (t <= 0) return 0;
+  if (t >= 1) return height / 2;
+  const climbing = across > s.mid === s.upperSide;
+  return climbing ? (height / 2) * t : (height / 2) * (2 - t);
+}
 export function zone(r: Room, p: Project) {
   const xx = (r.x + r.w / 2) / p.site.width,
     yy = (r.y + r.d / 2) / p.site.depth;

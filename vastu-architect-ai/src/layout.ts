@@ -495,14 +495,16 @@ function uniqueNames(rooms: Room[]) {
 }
 function buildFloor(brief: FloorBrief, frame: Frame, index: number): Floor {
   const { near, far } = frame.doors;
-  const rooms: Room[] = [
-    room(
-      "stairs",
-      brief.role === "terrace" ? "Stair head" : "Staircase",
-      frame.core,
-      near,
-    ),
-  ];
+  const core = room(
+    "stairs",
+    brief.role === "terrace" ? "Stair head" : "Staircase",
+    frame.core,
+    near,
+  );
+  // The door opens onto the arrival landing at the near end of the core, so
+  // you step off the flight and straight out, not into the stairwell.
+  core.doorOffset = 0;
+  const rooms: Room[] = [core];
   const spine: RoomType =
     brief.role === "terrace" ? "terrace" : brief.role === "stilt" ? "entrance" : "hall";
   rooms.push(

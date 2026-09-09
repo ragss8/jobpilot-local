@@ -1,6 +1,7 @@
 import {
   canWalk,
   getWalls,
+  stairRun,
   type Project,
   type Floor,
   type Room,
@@ -32,6 +33,31 @@ export const palettes = {
 };
 export function roomView(p: Project, f: Floor, r: Room) {
   const walls = getWalls(p, f);
+  // Stepping into a stairwell should face you up the flight, not at the
+  // landing wall behind you.
+  if (r.type === "stairs") {
+    const s = stairRun(r);
+    const along = s.axis === "z";
+    // Stand on the flight that climbs, not on the line between the two, or
+    // you set off underneath the one coming down.
+    const width = along ? r.w : r.d,
+      edge = along ? r.x : r.y;
+    const across = edge + width * (s.upperSide ? 0.75 : 0.25);
+    const at = s.from + s.arrival * 0.5,
+      up = s.from + s.arrival + s.run * 0.5;
+    const x = along ? across : at,
+      z = along ? at : across;
+    if (canWalk(x, z, p, f, walls))
+      return {
+        x,
+        z,
+        yaw: Math.atan2(
+          -((along ? across : up) - x),
+          -((along ? up : across) - z),
+        ),
+        pitch: 0.06,
+      };
+  }
   const targets = [
     [0.83, 0.86],
     [0.7, 0.83],
