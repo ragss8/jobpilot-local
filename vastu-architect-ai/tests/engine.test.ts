@@ -149,7 +149,7 @@ test("import round-trips and rejects malformed or excessive data", () => {
     null,
     {},
     [],
-    { ...p, version: 2 },
+    { ...p, version: 3 },
     { ...p, wallThickness: NaN },
     { ...p, floors: [] },
   ])

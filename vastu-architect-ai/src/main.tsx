@@ -635,8 +635,16 @@ function App() {
                     "counter",
                     "wardrobe",
                     "toilet",
+                    "shower",
                     "altar",
                     "desk",
+                    "car",
+                    "recliner",
+                    "screen",
+                    "washer",
+                    "planter",
+                    "bench",
+                    "pergola",
                   ] as Furniture["kind"][]
                 ).map((kind) => (
                   <button
@@ -652,6 +660,14 @@ function App() {
                         toilet: [2, 3],
                         altar: [2.5, 1.5],
                         desk: [4, 2],
+                        car: [6.2, 14.5],
+                        recliner: [3, 2.9],
+                        screen: [8, 0.5],
+                        planter: [3, 2],
+                        bench: [5, 1.8],
+                        washer: [2.4, 2.4],
+                        pergola: [10, 8],
+                        shower: [3, 3],
                       };
                       const [w, d] = dims[kind];
                       editRoom(room!.id, {

@@ -8,20 +8,42 @@ export type RoomType =
   | "dining"
   | "hall"
   | "stairs"
-  | "office";
+  | "office"
+  | "parking"
+  | "utility"
+  | "theatre"
+  | "store"
+  | "entrance"
+  | "terrace"
+  | "seating"
+  | "garden"
+  | "balcony";
 export type Material = "marble" | "wood" | "terrazzo" | "tile";
 export type Direction = "North" | "East" | "South" | "West";
+/** Levels stack in array order. A stilt is the open parking ground level, a
+ *  terrace is the open roof; both skip the enclosed-room treatment. */
+export type FloorRole = "stilt" | "residential" | "terrace";
+export const furnitureKinds = [
+  "bed",
+  "sofa",
+  "table",
+  "counter",
+  "wardrobe",
+  "toilet",
+  "altar",
+  "desk",
+  "car",
+  "recliner",
+  "screen",
+  "planter",
+  "bench",
+  "washer",
+  "pergola",
+  "shower",
+] as const;
 export interface Furniture {
   id: string;
-  kind:
-    | "bed"
-    | "sofa"
-    | "table"
-    | "counter"
-    | "wardrobe"
-    | "toilet"
-    | "altar"
-    | "desk";
+  kind: (typeof furnitureKinds)[number];
   x: number;
   y: number;
   w: number;
@@ -46,10 +68,11 @@ export interface Floor {
   id: string;
   name: string;
   height: number;
+  role: FloorRole;
   rooms: Room[];
 }
 export interface Project {
-  version: 1;
+  version: 2;
   name: string;
   site: {
     width: number;
@@ -85,6 +108,11 @@ export interface Wall {
 }
 export const round = (n: number) => Math.round(n * 100) / 100;
 export const uid = () => crypto.randomUUID();
+/** Height of the terrace edge wall, in feet. */
+export const PARAPET = 3.5;
+/** A dog-legged flight: two runs against a mid-landing. Sized so the core is
+ *  identical on every level and the flights stack. */
+export const STAIR = { w: 8, d: 13, tread: 0.9, riser: 0.58 };
 export const roomColors: Record<RoomType, string> = {
   living: "#ede3d1",
   bedroom: "#e8e3db",
@@ -96,7 +124,33 @@ export const roomColors: Record<RoomType, string> = {
   hall: "#f4efe5",
   stairs: "#e1e5df",
   office: "#e2e7e9",
+  parking: "#dcdcd6",
+  utility: "#e0e6e4",
+  theatre: "#ded9e0",
+  store: "#e6e2da",
+  entrance: "#eae6da",
+  terrace: "#e9eee6",
+  seating: "#ecdfd0",
+  garden: "#dde8d6",
+  balcony: "#e7ecdf",
 };
+/** Ground level of a floor, in feet, from the heights of everything below it. */
+export function floorBase(p: Project, index: number) {
+  return round(
+    p.floors.slice(0, index).reduce((sum, f) => sum + f.height, 0),
+  );
+}
+/** Rooms that are enclosed and habitable: they need walls, a door, and
+ *  ventilation. Open levels (parking, terrace decks, gardens) do not. */
+export const openRoomTypes: RoomType[] = [
+  "parking",
+  "terrace",
+  "seating",
+  "garden",
+  "entrance",
+  "balcony",
+];
+export const isOpen = (t: RoomType) => openRoomTypes.includes(t);
 export const materialColors: Record<Material, string> = {
   marble: "#e7deca",
   wood: "#b99066",
@@ -105,6 +159,9 @@ export const materialColors: Record<Material, string> = {
 };
 export function furnish(r: Room): Furniture[] {
   const items: Furniture[] = [];
+  // Keep a clear approach in front of the door. Without this a bed or a
+  // wardrobe can be laid across the only way into the room.
+  const clear = doorClearance(r);
   const add = (
     kind: Furniture["kind"],
     x: number,
@@ -117,6 +174,7 @@ export function furnish(r: Room): Furniture[] {
       y >= 0.2 &&
       x + w <= r.w - 0.2 &&
       y + d <= r.d - 0.2 &&
+      !overlaps({ x, y, w, d }, clear) &&
       !items.some(
         (a) =>
           Math.min(a.x + a.w, x + w) - Math.max(a.x, x) > 0.05 &&
@@ -125,28 +183,146 @@ export function furnish(r: Room): Furniture[] {
     )
       items.push({ id: uid(), kind, x, y, w, d, rotation: 0 });
   };
+  /** Place a piece against the wall opposite the door, centred on it. */
+  const against = (kind: Furniture["kind"], w: number, d: number) => {
+    const back = { n: "s", s: "n", e: "w", w: "e" }[r.doorSide];
+    if (back === "n") add(kind, (r.w - w) / 2, 0.65, w, d);
+    else if (back === "s") add(kind, (r.w - w) / 2, r.d - d - 0.65, w, d);
+    else if (back === "w") add(kind, 0.65, (r.d - d) / 2, w, d);
+    else add(kind, r.w - w - 0.65, (r.d - d) / 2, w, d);
+  };
+  /** Fill a flank wall, one that does not carry the door. */
+  const flank = (kind: Furniture["kind"], long: number, deep: number) => {
+    const side = r.doorSide === "n" || r.doorSide === "s" ? "w" : "n";
+    if (side === "w") add(kind, 0.5, (r.d - long) / 2, deep, long);
+    else add(kind, (r.w - long) / 2, 0.5, long, deep);
+  };
   if (r.type === "bedroom" || r.type === "master") {
-    add("bed", Math.max(0.6, (r.w - 5.2) / 2), 0.65, 5.2, 6.6);
-    add("wardrobe", 0.5, r.d - 2.1, Math.min(4, r.w - 1), 1.6);
+    against("bed", Math.min(5.2, r.w - 1.4), Math.min(6.6, r.d - 1.4));
+    flank("wardrobe", Math.min(4, Math.min(r.w, r.d) - 1.4), 1.6);
   }
   if (r.type === "living") {
-    add("sofa", 0.6, 0.65, Math.min(7, r.w - 1.2), 2.7);
-    add("table", Math.max(0.6, r.w / 2 - 1.6), 4.3, 3.2, 1.8);
+    against("sofa", Math.min(7, r.w - 1.4), 2.7);
+    add(
+      "table",
+      Math.max(0.6, r.w / 2 - 1.6),
+      Math.max(0.6, r.d / 2 - 0.9),
+      3.2,
+      1.8,
+    );
   }
   if (r.type === "dining") add("table", r.w / 2 - 2, r.d / 2 - 1.3, 4, 2.6);
   if (r.type === "kitchen") {
-    add("counter", 0.4, 0.4, r.w - 0.8, 2);
-    add("counter", r.w - 2.4, 2.4, 2, Math.max(2, r.d - 3));
+    flank("counter", Math.min(r.w, r.d) - 1, 2);
+    against("counter", Math.min(5, r.w - 1.4), 2);
   }
-  if (r.type === "bathroom") add("toilet", r.w / 2 - 1.1, 0.6, 2.2, 3);
-  if (r.type === "pooja") add("altar", r.w / 2 - 1.4, 0.5, 2.8, 1.5);
-  if (r.type === "office") add("desk", 0.5, 0.5, 4, 2);
+  if (r.type === "bathroom") {
+    against("toilet", 2.2, 3);
+    flank("shower", 3, 3);
+  }
+  if (r.type === "pooja") against("altar", Math.min(2.8, r.w - 1.4), 1.5);
+  if (r.type === "office") flank("desk", Math.min(4, r.w - 1.4), 2);
+  if (r.type === "parking") {
+    // 6 x 14.5 clear is a comfortable Indian car bay. Bays tile across the
+    // short side and sit away from the driveway threshold.
+    const bay = { w: 6.2, d: 14.5 };
+    const acrossW = r.w >= r.d;
+    const lane = acrossW ? bay.d : bay.w,
+      pitch = acrossW ? bay.w : bay.d;
+    const n = Math.max(1, Math.floor((acrossW ? r.w : r.d) / (pitch + 0.6)));
+    const off = r.doorSide === "e" || r.doorSide === "s" ? 0.6 : undefined;
+    for (let i = 0; i < n; i++) {
+      const at = 0.6 + i * (pitch + 0.6);
+      const back =
+        off ?? Math.max(0.6, (acrossW ? r.d : r.w) - lane - 0.6);
+      if (acrossW) add("car", at, back, bay.w, bay.d);
+      else add("car", back, at, bay.w, bay.d);
+    }
+  }
+  if (r.type === "utility") {
+    against("washer", 2.4, 2.4);
+    flank("counter", Math.min(5, Math.min(r.w, r.d) - 1.4), 2);
+  }
+  if (r.type === "theatre") {
+    against("screen", Math.min(8, r.w - 1.4), 0.5);
+    // Rows face the screen, set back from it and from the door.
+    const seats = Math.max(1, Math.floor((r.w - 1) / 3.4));
+    for (let row = 0; row < 2; row++)
+      for (let seat = 0; seat < seats; seat++)
+        add(
+          "recliner",
+          Math.max(0.5, (r.w - seats * 3.4) / 2) + seat * 3.4,
+          r.d - 7 + row * 3.2,
+          3,
+          2.9,
+        );
+  }
+  if (r.type === "store") flank("wardrobe", Math.min(4, r.w - 1.4), 1.8);
+  if (r.type === "seating") {
+    against("sofa", Math.min(7, r.w - 1.4), 2.7);
+    add("table", Math.max(0.6, r.w / 2 - 1.6), Math.max(0.6, r.d / 2 - 0.9), 3.2, 1.8);
+    if (r.d > 12) add("pergola", 0.4, r.d - 10, Math.min(12, r.w - 0.8), 9.5);
+  }
+  if (r.type === "garden") {
+    for (let i = 0; i < Math.max(1, Math.floor(r.w / 4)); i++)
+      add("planter", 0.5 + i * 4, 0.5, 3, 2);
+    add("bench", Math.max(0.5, r.w / 2 - 2.5), r.d - 2.4, 5, 1.8);
+  }
+  if (r.type === "balcony")
+    add("bench", Math.max(0.5, r.w / 2 - 2), Math.max(0.5, r.d - 2.2), 4, 1.6);
   return items;
+}
+const overlaps = (
+  a: { x: number; y: number; w: number; d: number },
+  b: { x: number; y: number; w: number; d: number },
+) =>
+  Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 0.05 &&
+  Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y) > 0.05;
+/** The strip a person needs to get through the door and turn into the room,
+ *  in room-local coordinates. */
+export function doorClearance(r: Room) {
+  const gap = 3.6,
+    // An open room needs only its threshold kept clear; you can walk around
+    // whatever is in it. An enclosed room needs space to enter and turn.
+    deep = isOpen(r.type) ? 1.2 : 3.2;
+  if (r.doorSide === "n" || r.doorSide === "s") {
+    const x = Math.min(Math.max(0, (r.w - gap) * r.doorOffset), r.w - gap);
+    return {
+      x,
+      y: r.doorSide === "n" ? 0 : r.d - deep,
+      w: gap,
+      d: Math.min(deep, r.d),
+    };
+  }
+  const y = Math.min(Math.max(0, (r.d - gap) * r.doorOffset), r.d - gap);
+  return {
+    x: r.doorSide === "w" ? 0 : r.w - deep,
+    y,
+    w: Math.min(deep, r.w),
+    d: gap,
+  };
+}
+/** The rectangle a building may occupy: the site less its setbacks, with the
+ *  larger road-side setback applied on the facing edge. */
+export function buildableRect(site: Project["site"]) {
+  const { width, depth, setback, front, facing } = site;
+  return {
+    x: setback + (facing === "West" ? front - setback : 0),
+    y: setback + (facing === "North" ? front - setback : 0),
+    w:
+      width -
+      2 * setback -
+      (["East", "West"].includes(facing) ? front - setback : 0),
+    d:
+      depth -
+      2 * setback -
+      (["North", "South"].includes(facing) ? front - setback : 0),
+  };
 }
 export function defaultProject(): Project {
   return generate(
     {
-      version: 1,
+      version: 2,
       name: "The Courtyard House",
       site: { width: 30, depth: 40, facing: "South", setback: 2, front: 4 },
       requirements: {
@@ -165,17 +341,8 @@ export function defaultProject(): Project {
 export function generate(base: Project, variant = 0): Project {
   const p = structuredClone(base);
   p.variant = variant;
-  const { width, depth, setback, front, facing } = p.site;
-  const x = setback + (facing === "West" ? front - setback : 0),
-    y = setback + (facing === "North" ? front - setback : 0);
-  const w =
-      width -
-      2 * setback -
-      (["East", "West"].includes(facing) ? front - setback : 0),
-    d =
-      depth -
-      2 * setback -
-      (["North", "South"].includes(facing) ? front - setback : 0);
+  const { facing } = p.site;
+  const { x, y, w, d } = buildableRect(p.site);
   if (w < 22 || d < 28)
     throw new Error(
       "This template needs a buildable area of at least 22 × 28 ft. Increase the site or reduce setbacks.",
@@ -254,7 +421,9 @@ export function generate(base: Project, variant = 0): Project {
     );
     if (entry) entry.doorOffset = 0.5;
   }
-  p.floors = [{ id: uid(), name: "Ground floor", height: 10, rooms }];
+  p.floors = [
+    { id: uid(), name: "Ground floor", height: 10, role: "residential", rooms },
+  ];
   return p;
 }
 export function getOpenings(p: Project, f: Floor): Opening[] {
@@ -288,13 +457,27 @@ export function getOpenings(p: Project, f: Floor): Opening[] {
     minY = Math.min(...f.rooms.map((r) => r.y)),
     maxY = Math.max(...f.rooms.map((r) => r.y + r.d));
   for (const r of f.rooms) {
+    if (isOpen(r.type)) {
+      // An open room has no walls of its own, but the enclosed rooms beside it
+      // do. Cut a wide opening so the space is genuinely reachable instead of
+      // being sealed in by its neighbours.
+      push(r, r.doorSide, r.doorOffset, 6, "door");
+      continue;
+    }
     push(r, r.doorSide, r.doorOffset, 3, "door");
     if (r.type === "hall") continue;
-    if (Math.abs(r.x - minX) < 0.02) push(r, "w", r.windowOffset, 4, "window");
-    else if (Math.abs(r.x + r.w - maxX) < 0.02)
-      push(r, "e", r.windowOffset, 4, "window");
-    else if (Math.abs(r.y - minY) < 0.02)
-      push(r, "n", r.windowOffset, 3, "window");
+    // Every enclosed room gets a window on an exterior edge it actually
+    // touches, preferring an edge that is not already carrying its door.
+    const exterior = exteriorSides(r, { minX, maxX, minY, maxY });
+    const side = exterior.find((s) => s !== r.doorSide) ?? exterior[0];
+    if (side)
+      push(
+        r,
+        side,
+        r.windowOffset,
+        side === "n" || side === "s" ? 3 : 4,
+        "window",
+      );
   }
   if (p.site.facing === "East" || p.site.facing === "West") {
     const r = f.rooms.find((r) =>
@@ -302,9 +485,33 @@ export function getOpenings(p: Project, f: Floor): Opening[] {
     );
     if (r) push(r, p.site.facing === "West" ? "w" : "e", 0.5, 3.5, "door");
   }
-  // NE pooja is reached through the family lounge; both share the opening.
-  void maxY;
   return out;
+}
+/** Which of a room's sides sit on the floor's outer envelope. */
+export function exteriorSides(
+  r: Room,
+  b: { minX: number; maxX: number; minY: number; maxY: number },
+): Room["doorSide"][] {
+  const on = (a: number, c: number) => Math.abs(a - c) < 0.02;
+  return (
+    [
+      ["w", on(r.x, b.minX)],
+      ["e", on(r.x + r.w, b.maxX)],
+      ["n", on(r.y, b.minY)],
+      ["s", on(r.y + r.d, b.maxY)],
+    ] as const
+  )
+    .filter(([, hit]) => hit)
+    .map(([side]) => side);
+}
+/** The outer envelope of a floor, from its rooms. */
+export function floorBounds(f: Floor) {
+  return {
+    minX: Math.min(...f.rooms.map((r) => r.x)),
+    maxX: Math.max(...f.rooms.map((r) => r.x + r.w)),
+    minY: Math.min(...f.rooms.map((r) => r.y)),
+    maxY: Math.max(...f.rooms.map((r) => r.y + r.d)),
+  };
 }
 export function getWalls(p: Project, f: Floor): Wall[] {
   const groups = new Map<
@@ -312,6 +519,7 @@ export function getWalls(p: Project, f: Floor): Wall[] {
     { axis: "h" | "v"; fixed: number; ranges: number[][] }
   >();
   for (const r of f.rooms) {
+    if (isOpen(r.type)) continue;
     for (const [axis, fixed, start, end] of [
       ["h", r.y, r.x, r.x + r.w],
       ["h", r.y + r.d, r.x, r.x + r.w],
@@ -351,6 +559,28 @@ export function getWalls(p: Project, f: Floor): Wall[] {
       }
     }
   }
+  // An open roof is ringed by a waist-high parapet instead of full walls, so a
+  // walker is stopped at the edge without the level being boxed in.
+  if (f.role === "terrace" && f.rooms.length) {
+    const x0 = Math.min(...f.rooms.map((r) => r.x)),
+      x1 = Math.max(...f.rooms.map((r) => r.x + r.w)),
+      y0 = Math.min(...f.rooms.map((r) => r.y)),
+      y1 = Math.max(...f.rooms.map((r) => r.y + r.d));
+    for (const [axis, fixed, start, end] of [
+      ["h", y0, x0, x1],
+      ["h", y1, x0, x1],
+      ["v", x0, y0, y1],
+      ["v", x1, y0, y1],
+    ] as const)
+      walls.push({
+        axis,
+        fixed: round(fixed),
+        start: round(start),
+        end: round(end),
+        bottom: 0,
+        top: PARAPET,
+      });
+  }
   return walls;
 }
 export function zone(r: Room, p: Project) {
@@ -389,6 +619,21 @@ export function vastu(p: Project, f: Floor) {
     checks,
   };
 }
+/** Room types that are legitimately narrower than a habitable room. */
+const SLIM: RoomType[] = [
+  "hall",
+  "pooja",
+  "bathroom",
+  "dining",
+  "stairs",
+  "utility",
+  "store",
+  "entrance",
+  "balcony",
+  "garden",
+  "terrace",
+  "seating",
+];
 export function validate(p: Project, f: Floor): string[] {
   const errors: string[] = [];
   for (const r of f.rooms) {
@@ -406,13 +651,7 @@ export function validate(p: Project, f: Floor): string[] {
           0.05
     )
       errors.push(`${r.name} crosses the site setback.`);
-    if (
-      r.type !== "hall" &&
-      r.type !== "pooja" &&
-      r.type !== "bathroom" &&
-      r.type !== "dining" &&
-      (r.w < 7 || r.d < 7)
-    )
+    if (!SLIM.includes(r.type) && (r.w < 7 || r.d < 7))
       errors.push(`${r.name} has a side shorter than 7 ft.`);
     for (const item of r.furniture) {
       const b = furnitureBounds(item);
@@ -447,7 +686,60 @@ export function validate(p: Project, f: Floor): string[] {
       )
         errors.push(`${a.name} overlaps ${b.name}.`);
     }
+  const bounds = f.rooms.length ? floorBounds(f) : null;
+  if (bounds)
+    for (const r of f.rooms)
+      if (
+        !isOpen(r.type) &&
+        r.type !== "hall" &&
+        r.type !== "bathroom" &&
+        !exteriorSides(r, bounds).length
+      )
+        errors.push(`${r.name} is landlocked, with no wall for a window.`);
+  for (const name of unreachable(p, f))
+    errors.push(`${name} cannot be reached from the entrance.`);
   return errors;
+}
+/** Rooms with no walkable path back to the floor's arrival point. Flood-fills
+ *  a half-foot grid through doorways using the same collision test the
+ *  walkthrough uses, so circulation matches what a visitor can actually do. */
+export function unreachable(p: Project, f: Floor): string[] {
+  const reach = f.rooms.find((r) => r.type === "stairs" || r.type === "hall");
+  if (!reach || f.rooms.length < 2) return [];
+  const walls = getWalls(p, f),
+    step = 0.5,
+    b = floorBounds(f);
+  const key = (x: number, y: number) =>
+    `${Math.round(x / step)}:${Math.round(y / step)}`;
+  const start = { x: reach.x + reach.w / 2, y: reach.y + reach.d / 2 };
+  if (!canWalk(start.x, start.y, p, f, walls)) return [];
+  const seen = new Set([key(start.x, start.y)]),
+    queue = [start];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    for (const [dx, dy] of [
+      [step, 0],
+      [-step, 0],
+      [0, step],
+      [0, -step],
+    ]) {
+      const x = round(cur.x + dx),
+        y = round(cur.y + dy);
+      if (x < b.minX || x > b.maxX || y < b.minY || y > b.maxY) continue;
+      if (seen.has(key(x, y)) || !canWalk(x, y, p, f, walls)) continue;
+      seen.add(key(x, y));
+      queue.push({ x, y });
+    }
+  }
+  return f.rooms
+    .filter((r) => {
+      if (r.id === reach.id || r.type === "bathroom") return false;
+      for (let x = r.x + 0.5; x < r.x + r.w - 0.4; x += step)
+        for (let y = r.y + 0.5; y < r.y + r.d - 0.4; y += step)
+          if (seen.has(key(x, y))) return false;
+      return true;
+    })
+    .map((r) => r.name);
 }
 export function furnitureBounds(f: Furniture) {
   const rotated = Math.abs(f.rotation % 180) === 90;
@@ -515,14 +807,24 @@ export function parseBrief(text: string, base: Project) {
   if (budget) p.requirements.budget = +budget[1];
   return p;
 }
+/** Projects saved before floors carried a role read as ordinary residential
+ *  levels. Migration is in-place on a clone, ahead of validation. */
+function migrate(raw: unknown): unknown {
+  const p = raw as { version?: number; floors?: { role?: string }[] };
+  if (!p || typeof p !== "object" || p.version !== 1) return raw;
+  const next = structuredClone(p);
+  next.version = 2;
+  for (const f of next.floors ?? []) f.role = "residential";
+  return next;
+}
 export function parseProject(raw: unknown): Project {
-  const p = raw as Project;
+  const p = migrate(raw) as Project;
   const num = (v: unknown, min: number, max: number) =>
     typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
   const str = (v: unknown) => typeof v === "string" && v.length <= 120;
   if (
     !p ||
-    p.version !== 1 ||
+    p.version !== 2 ||
     !str(p.name) ||
     !p.site ||
     !num(p.site.width, 20, 150) ||
@@ -531,7 +833,7 @@ export function parseProject(raw: unknown): Project {
     !num(p.site.front, 0, 20) ||
     !["North", "South", "East", "West"].includes(p.site.facing) ||
     !p.requirements ||
-    !num(p.requirements.bedrooms, 1, 4) ||
+    !num(p.requirements.bedrooms, 1, 8) ||
     !str(p.requirements.style) ||
     !["Strict", "Balanced", "Off"].includes(p.requirements.vastu) ||
     !num(p.requirements.budget, 1, 10000) ||
@@ -553,6 +855,7 @@ export function parseProject(raw: unknown): Project {
     if (
       !str(f.name) ||
       !num(f.height, 8, 16) ||
+      !["stilt", "residential", "terrace"].includes(f.role) ||
       !Array.isArray(f.rooms) ||
       f.rooms.length < 1 ||
       f.rooms.length > 60
@@ -580,16 +883,7 @@ export function parseProject(raw: unknown): Project {
       for (const item of r.furniture) {
         id(item.id);
         if (
-          ![
-            "bed",
-            "sofa",
-            "table",
-            "counter",
-            "wardrobe",
-            "toilet",
-            "altar",
-            "desk",
-          ].includes(item.kind) ||
+          !(furnitureKinds as readonly string[]).includes(item.kind) ||
           !num(item.x, 0, 150) ||
           !num(item.y, 0, 150) ||
           !num(item.w, 0.2, 40) ||
