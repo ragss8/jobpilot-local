@@ -9,7 +9,52 @@ import {
   type Room,
   type Furniture,
 } from "./engine";
-export function FurnitureDrawing({ item: f }: { item: Furniture }) {
+export /** A dog-legged flight drawn as treads with an up arrow, the way a plan
+ *  shows a staircase. Two runs against a mid-landing. */
+function StairDrawing({ room: r }: { room: Room }) {
+  const along = r.d >= r.w ? "v" : "h";
+  const span = along === "v" ? r.d : r.w,
+    across = along === "v" ? r.w : r.d;
+  const run = (span - 3.2) / 2,
+    treads = Math.max(3, Math.round(run / 0.9)),
+    half = across / 2;
+  const lines = [];
+  for (let side = 0; side < 2; side++)
+    for (let i = 1; i < treads; i++) {
+      const at = side === 0 ? 0.3 + (i * run) / treads : span - 0.3 - (i * run) / treads;
+      const a = side === 0 ? 0.15 : half,
+        b = side === 0 ? half : across - 0.15;
+      lines.push(
+        along === "v"
+          ? `M ${r.x + a} ${r.y + at} H ${r.x + b}`
+          : `M ${r.x + at} ${r.y + a} V ${r.y + b}`,
+      );
+    }
+  const mid = along === "v" ? r.x + half : r.y + half;
+  return (
+    <g pointerEvents="none" stroke="#8d9686" strokeWidth=".07" fill="none">
+      <path d={lines.join(" ")} />
+      <path
+        d={
+          along === "v"
+            ? `M ${mid - half + 0.15} ${r.y + 0.3} V ${r.y + r.d - 0.3}`
+            : `M ${r.x + 0.3} ${mid - half + 0.15} H ${r.x + r.w - 0.3}`
+        }
+        opacity="0"
+      />
+      <path
+        d={
+          along === "v"
+            ? `M ${r.x + across * 0.25} ${r.y + span - 1} V ${r.y + 1.2} l -.35 .6 m .35 -.6 l .35 .6`
+            : `M ${r.x + span - 1} ${r.y + across * 0.25} H ${r.x + 1.2} l .6 -.35 m -.6 .35 l .6 .35`
+        }
+        strokeWidth=".09"
+        stroke="#6f7d6f"
+      />
+    </g>
+  );
+}
+function FurnitureDrawing({ item: f }: { item: Furniture }) {
   return (
     <g
       transform={`translate(${f.x} ${f.y}) rotate(${f.rotation} ${f.w / 2} ${f.d / 2})`}
@@ -61,6 +106,95 @@ export function FurnitureDrawing({ item: f }: { item: Furniture }) {
           <rect x={f.w - 1.7} y={f.d - 0.2} width="1" height=".6" rx=".2" />
           <rect width={f.w} height={f.d} rx=".35" fill="#cbb998" />
           <circle cx={f.w / 2} cy={f.d / 2} r=".3" fill="#739078" />
+        </>
+      ) : f.kind === "car" ? (
+        <>
+          <rect
+            x=".25"
+            width={f.w - 0.5}
+            height={f.d}
+            rx="1.1"
+            fill="#c9ccc4"
+          />
+          <path
+            d={`M .95 ${f.d * 0.26} H ${f.w - 0.95} M .95 ${f.d * 0.68} H ${f.w - 0.95}`}
+          />
+          <rect
+            x=".9"
+            y={f.d * 0.28}
+            width={f.w - 1.8}
+            height={f.d * 0.38}
+            rx=".35"
+            fill="#aeb4b0"
+          />
+          {[0.2, 0.78].map((t) => (
+            <g key={t}>
+              <rect x="0" y={f.d * t} width=".45" height="1.5" rx=".2" fill="#5c5f5a" />
+              <rect
+                x={f.w - 0.45}
+                y={f.d * t}
+                width=".45"
+                height="1.5"
+                rx=".2"
+                fill="#5c5f5a"
+              />
+            </g>
+          ))}
+        </>
+      ) : f.kind === "recliner" ? (
+        <>
+          <rect width={f.w} height={f.d} rx=".35" fill="#a9a294" />
+          <rect
+            x=".28"
+            y=".7"
+            width={f.w - 0.56}
+            height={f.d - 0.95}
+            rx=".25"
+            fill="#d3ccbb"
+          />
+        </>
+      ) : f.kind === "screen" ? (
+        <rect width={f.w} height={Math.max(0.35, f.d)} rx=".1" fill="#4c5157" />
+      ) : f.kind === "planter" ? (
+        <>
+          <rect width={f.w} height={f.d} rx=".3" fill="#cdbfa6" />
+          {[0.28, 0.5, 0.72].map((t) => (
+            <circle
+              key={t}
+              cx={f.w * t}
+              cy={f.d / 2}
+              r={Math.min(f.w, f.d) * 0.19}
+              fill="#8ba07d"
+            />
+          ))}
+        </>
+      ) : f.kind === "bench" ? (
+        <>
+          <rect width={f.w} height={f.d} rx=".22" fill="#c3b393" />
+          <path d={`M .3 ${f.d * 0.5} H ${f.w - 0.3}`} />
+        </>
+      ) : f.kind === "pergola" ? (
+        <g fill="none" strokeDasharray=".35 .3" stroke="#9aa38e">
+          <rect width={f.w} height={f.d} rx=".2" />
+          {Array.from({ length: Math.max(2, Math.floor(f.w / 1.6)) }).map(
+            (_, i, a) => (
+              <path
+                key={i}
+                d={`M ${((i + 0.5) * f.w) / a.length} 0 V ${f.d}`}
+              />
+            ),
+          )}
+        </g>
+      ) : f.kind === "washer" ? (
+        <>
+          <rect width={f.w} height={f.d} rx=".2" fill="#d5dcd8" />
+          <circle cx={f.w / 2} cy={f.d / 2} r={Math.min(f.w, f.d) * 0.31} />
+        </>
+      ) : f.kind === "shower" ? (
+        <>
+          <rect width={f.w} height={f.d} rx=".15" fill="#dde6e4" />
+          <path d={`M 0 0 L ${f.w} ${f.d} M ${f.w} 0 L 0 ${f.d}`} />
+          <circle cx={f.w * 0.22} cy={f.d * 0.22} r=".3" fill="#b9c5c2" />
         </>
       ) : f.kind === "toilet" ? (
         <>
@@ -299,6 +433,7 @@ export default function Plan({
                     : roomColors[r.type]
               }
             />
+            {r.type === "stairs" && <StairDrawing room={r} />}
             {showFurniture && (
               <g transform={`translate(${r.x} ${r.y})`} pointerEvents="none">
                 {r.furniture.map((f) => (

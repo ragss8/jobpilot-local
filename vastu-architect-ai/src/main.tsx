@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import Chat from "./Chat";
 import {
   ArrowUpRight,
   ArrowLeft,
@@ -128,6 +129,7 @@ function App() {
     [toast, setToast] = useState(initial.error),
     [saveState, setSaveState] = useState("Saved on this device"),
     [modal, setModal] = useState(false),
+    [chat, setChat] = useState(false),
     [draft, setDraft] = useState<Project>(project),
     [brief, setBrief] = useState(""),
     [options, setOptions] = useState<Project[] | null>(null),
@@ -477,15 +479,24 @@ function App() {
                 <button
                   className="button light"
                   onClick={() => {
+                    setOptions(null);
+                    setChat(true);
+                  }}
+                >
+                  <Sparkles size={15} />
+                  Describe your home
+                  <ArrowUpRight size={15} />
+                </button>
+                <button
+                  className="card-alt-link"
+                  onClick={() => {
                     setDraft(project);
                     setOptions(null);
                     setModal(true);
                     setFormError("");
                   }}
                 >
-                  <Sparkles size={15} />
-                  Create a new design
-                  <ArrowUpRight size={15} />
+                  or set the requirements by hand
                 </button>
                 <House className="card-watermark" size={120} />
               </div>
@@ -1248,7 +1259,7 @@ function App() {
                   <div>
                     <strong>
                       {
-                        floor.rooms.filter((r) =>
+                        project.floors.flatMap((f) => f.rooms).filter((r) =>
                           ["bedroom", "master"].includes(r.type),
                         ).length
                       }
@@ -1257,7 +1268,11 @@ function App() {
                   </div>
                   <div>
                     <strong>
-                      {floor.rooms.filter((r) => r.type === "bathroom").length}
+                      {
+                        project.floors
+                          .flatMap((f) => f.rooms)
+                          .filter((r) => r.type === "bathroom").length
+                      }
                     </strong>
                     <span>Bathrooms</span>
                   </div>
@@ -1435,6 +1450,28 @@ function App() {
           <IconButton label="Dismiss notification" onClick={() => setToast("")}>
             <X size={16} />
           </IconButton>
+        </div>
+      )}
+      {chat && (
+        <div className="modal-backdrop" onClick={() => setChat(false)}>
+          <div
+            className="modal wide"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dialog-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Chat
+              base={project}
+              onClose={() => setChat(false)}
+              onDesign={(next) => {
+                setOptions(next);
+                setChat(false);
+                setModal(true);
+                setFormError("");
+              }}
+            />
+          </div>
         </div>
       )}
       {modal && (
@@ -1667,21 +1704,28 @@ function App() {
                         );
                       }}
                     >
-                      <div className="mini-plan">
-                        <svg viewBox={`0 0 ${p.site.width} ${p.site.depth}`}>
-                          {p.floors[0].rooms.map((r) => (
-                            <rect
-                              key={r.id}
-                              x={r.x}
-                              y={r.y}
-                              width={r.w}
-                              height={r.d}
-                              fill={roomColors[r.type]}
-                              stroke="#596650"
-                              strokeWidth=".35"
-                            />
-                          ))}
-                        </svg>
+                      <div className="mini-stack">
+                        {p.floors.map((f) => (
+                          <div className="mini-plan" key={f.id}>
+                            <svg
+                              viewBox={`0 0 ${p.site.width} ${p.site.depth}`}
+                            >
+                              {f.rooms.map((r) => (
+                                <rect
+                                  key={r.id}
+                                  x={r.x}
+                                  y={r.y}
+                                  width={r.w}
+                                  height={r.d}
+                                  fill={roomColors[r.type]}
+                                  stroke="#596650"
+                                  strokeWidth=".35"
+                                />
+                              ))}
+                            </svg>
+                            <small>{f.name}</small>
+                          </div>
+                        ))}
                       </div>
                       <span className="eyebrow">
                         OPTION {String.fromCharCode(65 + p.variant)}
@@ -1698,14 +1742,37 @@ function App() {
                       <div className="detail-line">
                         <span>Vastu rules</span>
                         <strong>
-                          {vastu(p, p.floors[0]).score ?? "Off"}
-                          {p.requirements.vastu !== "Off" ? "%" : ""}
+                          {p.requirements.vastu === "Off"
+                            ? "Off"
+                            : `${Math.round(
+                                p.floors.reduce(
+                                  (a, f) => a + (vastu(p, f).score ?? 0),
+                                  0,
+                                ) / p.floors.length,
+                              )}%`}
+                        </strong>
+                      </div>
+                      <div className="detail-line">
+                        <span>Built area</span>
+                        <strong>
+                          {Math.round(
+                            p.floors.reduce(
+                              (a, f) =>
+                                a + f.rooms.reduce((n, r) => n + r.w * r.d, 0),
+                              0,
+                            ),
+                          ).toLocaleString()}{" "}
+                          sq ft
                         </strong>
                       </div>
                       <div className="detail-line">
                         <span>Plan checks</span>
                         <strong>
-                          {validate(p, p.floors[0]).length} to review
+                          {p.floors.reduce(
+                            (a, f) => a + validate(p, f).length,
+                            0,
+                          )}{" "}
+                          to review
                         </strong>
                       </div>
                       <span className="option-choose">
