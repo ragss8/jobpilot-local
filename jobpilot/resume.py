@@ -33,7 +33,8 @@ def extract_upload(filename, encoded):
 
 
 def fingerprint(profile, job):
-    return hashlib.sha256(json.dumps([profile,job['title'],job['description']],sort_keys=True).encode()).hexdigest()
+    from .reference_template import TEMPLATE_VERSION
+    return hashlib.sha256(json.dumps([profile,job['title'],job['description'],TEMPLATE_VERSION],sort_keys=True).encode()).hexdigest()
 
 
 def model_status(model):
@@ -85,55 +86,48 @@ def build_packet(directory, profile, job, model='qwen3:4b', use_ai=False, struct
     if structured:
         from .tailoring import structured_resume
         layout=structured_resume(profile,job)
-        if layout:
-            text=layout['text'];html=layout['html'];mode='Structured evidence tailoring'+(' + '+mode if use_ai else '')
+        if not layout:raise ValueError('The approved resume layout requires recognizable experience and education sections')
+        text=layout['text'];html=layout['html'];mode='Reference PDF layout with evidence tailoring'+(' + '+mode if use_ai else '')
     folder=Path(directory)/'packets'/job['id']; folder.mkdir(parents=True,exist_ok=True)
     (folder/'resume.txt').write_text(text,encoding='utf-8')
     (folder/'resume.html').write_text(html,encoding='utf-8')
     formats=['txt','html']
-    try:
-        from docx import Document
-        from docx.shared import Pt
-        doc=Document(); doc.styles['Normal'].font.name='Arial'; doc.styles['Normal'].font.size=Pt(10)
-        if layout:
-            for tag,line in layout['blocks']:
-                doc.add_paragraph(line,style={'h1':'Title','h2':'Heading 1','h3':'Heading 2','li':'List Bullet'}.get(tag,'Normal'))
-        else:
+    # The approved reference is a PDF layout; do not offer an unverified Word variant.
+    if layout is None:
+        try:
+            from docx import Document
+            from docx.shared import Pt
+            doc=Document(); doc.styles['Normal'].font.name='Arial'; doc.styles['Normal'].font.size=Pt(10)
             for line in text.splitlines():doc.add_paragraph(line)
-        doc.save(folder/'resume.docx'); formats.append('docx')
-    except ImportError: pass
-    try:
-        from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer
-        from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle
-        from reportlab.lib.pagesizes import A4
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
-        styles=getSampleStyleSheet()
-        fonts=[Path(__file__).parent/'fonts'/'DejaVuSans.ttf',Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'),Path('C:/Windows/Fonts/arial.ttf'),Path('/Library/Fonts/Arial.ttf'),Path('/System/Library/Fonts/Supplemental/Arial.ttf')]
-        font=next((p for p in fonts if p.exists()),None)
-        if font:
-            pdfmetrics.registerFont(TTFont('ResumeUnicode',str(font))); styles['Normal'].fontName='ResumeUnicode'
-        elif any(ord(x)>255 for x in text):
-            raise ValueError('Install a Unicode font for PDF export; HTML and DOCX preserve Unicode')
-        flow=[]
-        if layout:
-            family=styles['Normal'].fontName
-            styles.add(ParagraphStyle('ResumeTitle',fontName=family,fontSize=21,leading=25,spaceAfter=8,keepWithNext=True))
-            styles.add(ParagraphStyle('ResumeSection',fontName=family,fontSize=11,leading=14,spaceBefore=11,spaceAfter=5,keepWithNext=True))
-            styles.add(ParagraphStyle('ResumeSub',fontName=family,fontSize=10.5,leading=14,spaceBefore=7,spaceAfter=4,keepWithNext=True))
-            styles.add(ParagraphStyle('ResumeBody',fontName=family,fontSize=10,leading=14,spaceAfter=4))
-            styles.add(ParagraphStyle('ResumeBullet',parent=styles['ResumeBody'],leftIndent=10,firstLineIndent=-8))
-            for tag,line in layout['blocks']:
-                style=styles[{'h1':'ResumeTitle','h2':'ResumeSection','h3':'ResumeSub','li':'ResumeBullet'}.get(tag,'ResumeBody')]
-                flow.append(Paragraph(('• ' if tag=='li' else '')+escape(line),style))
-        else:
+            doc.save(folder/'resume.docx'); formats.append('docx')
+        except ImportError: pass
+    template_details=None
+    if layout:
+        from .reference_template import render_pdf
+        template_details=render_pdf(folder/'resume.pdf',layout)
+        formats.append('pdf')
+    else:
+        try:
+            from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer
+            from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            styles=getSampleStyleSheet()
+            fonts=[Path(__file__).parent/'fonts'/'DejaVuSans.ttf',Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'),Path('C:/Windows/Fonts/arial.ttf'),Path('/Library/Fonts/Arial.ttf'),Path('/System/Library/Fonts/Supplemental/Arial.ttf')]
+            font=next((p for p in fonts if p.exists()),None)
+            if font:
+                pdfmetrics.registerFont(TTFont('ResumeUnicode',str(font))); styles['Normal'].fontName='ResumeUnicode'
+            elif any(ord(x)>255 for x in text):
+                raise ValueError('Install a Unicode font for PDF export; HTML and DOCX preserve Unicode')
+            flow=[]
             for line in text.splitlines():
                 flow.append(Paragraph(escape(line),styles['Normal']) if line else Spacer(1,8))
-        SimpleDocTemplate(str(folder/'resume.pdf'),pagesize=A4,rightMargin=45,leftMargin=45,topMargin=40,bottomMargin=40).build(flow)
-        formats.append('pdf')
-    except (ImportError,ValueError): pass
+            SimpleDocTemplate(str(folder/'resume.pdf'),pagesize=A4,rightMargin=45,leftMargin=45,topMargin=40,bottomMargin=40).build(flow)
+            formats.append('pdf')
+        except (ImportError,ValueError): pass
     packet={'job_id':job['id'],'mode':mode,'note':note,'text':text,'highlights':highlights,'source_line_ids':selected,
-            'original_resume_text':original,
+            'original_resume_text':original,'template':layout.get('template') if layout else None,'template_details':template_details,
             'fingerprint':fingerprint(profile,job),'formats':formats,'download':{x:f'/api/packets/{job["id"]}/resume.{x}' for x in formats}}
     (folder/'packet.json').write_text(json.dumps(packet),encoding='utf-8')
     return packet

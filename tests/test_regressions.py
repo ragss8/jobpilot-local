@@ -22,7 +22,7 @@ class RegressionTests(unittest.TestCase):
             with data_lock(d):pass
     def test_profile_change_marks_packet_stale(self):
         with tempfile.TemporaryDirectory() as d:
-            s=Service(d);s.save_profile(profile());s.store.upsert_job(job());s.prepare(job()['id'])
+            s=Service(d);s.save_settings({'structured_tailoring':False});s.save_profile(profile());s.store.upsert_job(job());s.prepare(job()['id'])
             self.assertFalse(s.packet(job()['id'])['stale'])
             s.save_profile({'phone':'changed'})
             self.assertTrue(s.packet(job()['id'])['stale'])

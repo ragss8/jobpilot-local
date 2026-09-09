@@ -123,7 +123,10 @@ class MailTests(unittest.TestCase):
     def test_unrelated_mail_not_flagged(self):self.assertIsNone(classify('Shopping','Your parcel is on the way'))
 
 class ServiceTests(unittest.TestCase):
-    def setUp(self):self.temp=tempfile.TemporaryDirectory();self.s=Service(self.temp.name)
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.s=Service(self.temp.name)
+        # These orchestration fixtures intentionally use an unstructured resume.
+        self.s.save_settings({'structured_tailoring':False})
     def tearDown(self):self.temp.cleanup()
     def test_limits_and_unverified_profile(self):
         for bad in [31,0,-1,2.5,True]:
@@ -165,6 +168,7 @@ class ServiceTests(unittest.TestCase):
 class HTTPTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.service=Service(self.temp.name)
+        self.service.save_settings({'structured_tailoring':False})
         self.server=Server(('127.0.0.1',0),self.service);self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.base=f'http://127.0.0.1:{self.server.server_port}'
     def tearDown(self):self.server.shutdown();self.server.server_close();self.thread.join();self.temp.cleanup()

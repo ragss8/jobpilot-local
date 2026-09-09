@@ -156,6 +156,20 @@ Import a UTF-8 JSON array from **Job sources**. The example below is a fictional
 
 Only enter salary and experience values when the posting explicitly provides them. Omit unknown values. Sources currently do not normalize arbitrary salary currencies or ranges from feed text. With the strict salary setting off, an unknown salary is a warning; with it on, unknown-salary jobs are ineligible.
 
+## Approved resume layout
+
+The configured PDF template follows `M-Raghu-Gaikwad (1).pdf`: one US Letter page, Times New Roman 10 pt body text, a centered uppercase name, centered contact details and underlined blue links, ruled uppercase section headings, bold labels, and italic projects and dates. There is no added target-role heading. Confirmed experience and education are preserved; relevant bullets can move only within their original project.
+
+Automatic applications use this PDF template. The matching exports are PDF, HTML, and plain text; the previous Word layout is not offered for this template. If content cannot fit one page at the approved readable type size, generation stops rather than clipping facts or reverting to the rejected layout. Times New Roman must be installed locally. Earlier resume files are backed up before replacement.
+
+## Fresh listings in this workspace
+
+Fresh-only mode is enabled for this configured workspace. LinkedIn, Indeed, Naukri, and other job-board listings must have a verified posting time within the last 24 hours. Missing, date-only, invalid, or future timestamps are hidden unless the listing supplies a usable relative age. Rounded relative ages use the oldest possible time; discovering a listing again never resets its age.
+
+Company career openings are shown while verified active, regardless of original posting age. The active check must be no more than 24 hours old, and enabled scheduling refreshes company feeds hourly. Closed or expired listings disappear from opportunities. Failed requests never count as proof that a listing is active.
+
+The backend re-evaluates freshness on every state request, before preparation, and before submission. An open opportunities page removes expired entries on its regular refresh. Application history and duplicate-protection records remain available in the tracker. Old listings are hidden rather than deleting submission evidence.
+
 ## Application behavior and limits
 
 - The app uses regular Playwright Chromium, visible by default. It does not spoof a human identity, use stealth plugins, solve CAPTCHAs, bypass logins, or evade site restrictions.

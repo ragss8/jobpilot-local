@@ -11,6 +11,7 @@ from urllib.error import HTTPError
 from .matching import skills, evaluate
 from .sources import canonical_url, normalize, plain, fetch_board
 from .transport import read_public
+from .freshness import timestamp, relative_posted_at, availability
 
 ATS = {'jobs.lever.co': 'lever', 'job-boards.greenhouse.io': 'greenhouse',
        'boards.greenhouse.io': 'greenhouse', 'jobs.ashbyhq.com': 'ashby'}
@@ -66,7 +67,7 @@ def search_public(query, fetch=read_public):
 
 def linkedin_public(query, location, fetch=read_public):
     url = 'https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?' + urlencode(
-        {'keywords': query, 'location': location, 'start': 0, 'f_TPR': 'r604800'})
+        {'keywords': query, 'location': location, 'start': 0, 'f_TPR': 'r86400'})
     body, _ = fetch(url)
     parser = PageParser(); parser.feed(body)
     return list(dict.fromkeys(link.split('?')[0] for link in parser.links
@@ -75,10 +76,10 @@ def linkedin_public(query, location, fetch=read_public):
 
 def board_search_public(source,query,location,fetch=read_public):
     if source=='indeed':
-        url='https://in.indeed.com/jobs?'+urlencode({'q':query,'l':location})
+        url='https://in.indeed.com/jobs?'+urlencode({'q':query,'l':location,'fromage':1})
     elif source=='naukri':
         slug=lambda value:re.sub(r'[^a-z0-9]+','-',value.lower()).strip('-')
-        url=f'https://www.naukri.com/{slug(query)}-jobs-in-{slug(location)}'
+        url=f'https://www.naukri.com/{slug(query)}-jobs-in-{slug(location)}?jobAge=1'
     else:raise ValueError('Unknown board search source')
     body,final=fetch(url);parser=PageParser();parser.feed(body)
     if re.search(r'verify (?:you are|that you are) human|access denied|captcha challenge',plain(body),re.I):
@@ -99,6 +100,7 @@ def job_nodes(value):
 
 def structured_jobs(body, url):
     parser = PageParser(); parser.feed(body); results = []
+    checked_at=datetime.now(timezone.utc)
     for node in job_nodes(parser.structured):
         title = node.get('title'); description = node.get('description', '')
         org = node.get('hiringOrganization') or {}
@@ -127,8 +129,17 @@ def structured_jobs(body, url):
         source = next((x for x in ('linkedin', 'naukri', 'indeed') if x in source_host), 'careers')
         record = normalize(source, hashlib.sha256(url.encode()).hexdigest(), company, title, url, description,
                            '; '.join(filter(None, names)), verified_public_posting=True, discovery_url=url,
-                           posted_at=node.get('datePosted'), application_kind='browser',
+                           posted_at=node.get('datePosted'), valid_through=valid,
+                           active_verified_at=checked_at.isoformat(), application_kind='browser',
                            company_profile_url=org.get('sameAs') if isinstance(org,dict) else None)
+        if source=='linkedin':
+            ages=re.findall(r'<(?:span|time)\b[^>]*class=["\'][^"\']*posted-time-ago[^"\']*["\'][^>]*>(.*?)</(?:span|time)>',body,re.I|re.S)
+            if len(ages)==1:
+                relative=relative_posted_at(plain(ages[0]),checked_at)
+                published=timestamp(record['posted_at'])
+                if relative:
+                    oldest=min(published,timestamp(relative)) if published else timestamp(relative)
+                    record['posted_at']=oldest.isoformat()
         salary = node.get('baseSalary') or {}
         if isinstance(salary, dict) and salary.get('currency') == 'INR':
             value = salary.get('value') or {}
@@ -216,7 +227,8 @@ def discover(profile, settings, fetch=read_public, board_fetch=fetch_board, stop
                 continue
             body, final_url = fetch(url)
             records, links = structured_jobs(body, final_url)
-            for record in records: jobs[record['id']] = record
+            for record in records:
+                if not settings.get('fresh_only') or availability(record)['visible']:jobs[record['id']] = record
             for link in links:
                 board = board_from_url(urljoin(final_url, unescape(link)))
                 if board: boards[(board['provider'], board['slug'])] = board

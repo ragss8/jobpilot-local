@@ -4,6 +4,7 @@ import re
 import socket
 from urllib.parse import urlsplit
 from .resume import fingerprint
+from .freshness import require_available
 
 ATS_HOSTS={'jobs.lever.co','jobs.eu.lever.co','boards.greenhouse.io','job-boards.greenhouse.io','jobs.ashbyhq.com'}
 SUCCESS=[r'your application has been (?:submitted|received)',r'thank you for applying',r'thanks for applying',r'application submitted successfully']
@@ -195,6 +196,8 @@ def run_application(store, job, profile, packet, settings):
                 return 'prepared','Required fields and resume upload verified without clicking submit. Screenshot saved locally.'
             if not store.get('settings',{}).get('auto_submit'):
                 return 'needs_input','Automatic submission is paused. Form was prepared; screenshot is saved locally.'
+            # Time can cross the cutoff during model review or form filling.
+            require_available(job,settings)
             submit=page.get_by_role('button',name=re.compile(r'^(submit application|submit your application|submit|apply)$',re.I))
             if submit.count()!=1: return 'needs_input','Could not identify a single submission button.'
             before=page.locator('body').inner_text()

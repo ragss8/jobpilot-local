@@ -6,6 +6,7 @@ import urllib.request
 from html.parser import HTMLParser
 from urllib.parse import urlsplit, urlunsplit
 from .transport import tls_context
+from .db import now
 
 
 class TextParser(HTMLParser):
@@ -81,4 +82,6 @@ def fetch_board(board, fetch=get_json):
             result.append(normalize(provider,f'{slug}:{x.get("id") or x["jobUrl"]}',company,x['title'],x.get('applyUrl') or x['jobUrl'],x.get('descriptionPlain') or x.get('descriptionHtml',''),x.get('location',''),board=slug))
     else:
         raise ValueError('Choose Greenhouse, Lever, or Ashby')
+    verified=now()
+    for job in result:job['active_verified_at']=verified
     return result

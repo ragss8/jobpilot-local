@@ -14,6 +14,7 @@ from .resume import build_packet,extract_upload,model_status
 from .browser import run_application
 from . import mailbox
 from .discovery import discover, query_plan, refresh_public_job
+from .freshness import availability, require_available, timestamp
 
 DEFAULT_SETTINGS={'threshold':80,'daily_limit':25,'roles':['full stack','full-stack','software engineer','frontend','backend'],
     'locations':['Bengaluru','Bangalore'],'min_salary_lpa':15,'require_salary':False,'excluded_companies':[],
@@ -21,7 +22,7 @@ DEFAULT_SETTINGS={'threshold':80,'daily_limit':25,'roles':['full stack','full-st
     'schedule_enabled':False,'run_at':'09:30','timezone':'Asia/Kolkata','mail_enabled':False,'headless':False,
     'discovery_enabled':True,'discovery_sources':['employers','linkedin','naukri','indeed'],
     'discovery_page_limit':30,'browser_channel':'chrome','structured_tailoring':True,
-    'strict_required_skills':False,'excluded_required_skills':[]}
+    'strict_required_skills':False,'excluded_required_skills':[],'fresh_only':False}
 DEFAULT_PROFILE={'name':'','email':'','phone':'','location':'Bengaluru, India','years':None,'current_company':'',
                  'linkedin':'','github':'','portfolio':'','resume_text':'','answers':{},'verified':False}
 
@@ -71,7 +72,7 @@ class Service:
         if not isinstance(s['discovery_sources'],list) or not s['discovery_sources'] or any(x not in ('employers','linkedin','naukri','indeed') for x in s['discovery_sources']):
             raise ValueError('Choose supported discovery sources')
         for k in ('roles','locations','excluded_companies','keywords','excluded_required_skills'): s[k]=strings(s[k],k)
-        for k in ('require_salary','use_ai','auto_submit','schedule_enabled','mail_enabled','headless','discovery_enabled','structured_tailoring','strict_required_skills'):
+        for k in ('require_salary','use_ai','auto_submit','schedule_enabled','mail_enabled','headless','discovery_enabled','structured_tailoring','strict_required_skills','fresh_only'):
             if not isinstance(s[k],bool): raise ValueError(f'{k} must be true or false')
         from .resume import LOCAL_MODELS
         if s['model'] not in LOCAL_MODELS: raise ValueError('Choose a supported local Ollama model')
@@ -124,7 +125,12 @@ class Service:
         for j in self.store.jobs():
             key=hashlib.sha256((profile_key+json.dumps(j,sort_keys=True)).encode()).hexdigest()
             if key not in self._match_cache:self._match_cache[key]=evaluate(p,j,s)
-            jobs.append(dict(j,match=self._match_cache[key]))
+            match=self._match_cache[key]
+            # Evaluate against the current clock even when skill scores are cached.
+            freshness=availability(j)
+            if s['fresh_only'] and not freshness['visible']:
+                match={**match,'eligible':False,'blockers':match['blockers']+[freshness['reason']]}
+            jobs.append(dict(j,match=match,freshness=freshness))
         if len(self._match_cache)>10000:self._match_cache.clear()
         return sorted(jobs,key=lambda j:(j['match']['eligible'],j['match']['score']),reverse=True)
 
@@ -132,14 +138,17 @@ class Service:
         s=self.settings(); day=datetime.now(tz(s['timezone'])).date().isoformat()
         with self.store.connect() as c:
             attempted=c.execute('SELECT count(*) FROM attempts WHERE day=?',(day,)).fetchone()[0]
-        jobs=self.ranked()
-        return {'settings':s,'profile':self.profile(),'jobs':jobs,'events':self.store.rows('events',30),
+        all_jobs=self.ranked()
+        jobs=[j for j in all_jobs if not s['fresh_only'] or j['freshness']['visible']]
+        return {'settings':s,'profile':self.profile(),'jobs':jobs,
+                'history_jobs':[j for j in all_jobs if j['status']!='new'],
+                'hidden_stale':len(all_jobs)-len(jobs),'events':self.store.rows('events',30),
                 'discovery':self.store.get('last_discovery',{}),'search_plan':query_plan(self.profile(),s),
                 'questions':self.store.get('pending_questions',[]),
                 'attempts':self.store.rows('attempts'),'messages':self.store.rows('messages'),
                 'tasks':list(self.tasks.values())[-20:], 'last_sync':self.store.get('last_sync'),
                 'stats':{'discovered':len(jobs),'eligible':sum(x['match']['eligible'] and x['status'] in ('new','prepared','queued') for x in jobs),
-                         'submitted':sum(x['status']=='submitted' for x in jobs),'today':attempted},'busy':self.lock.locked()}
+                         'submitted':sum(x['status']=='submitted' for x in all_jobs),'today':attempted},'busy':self.lock.locked()}
 
     def import_jobs(self,data):
         if self.lock.locked(): raise ValueError('Wait for the current task before importing jobs')
@@ -197,6 +206,7 @@ class Service:
 
     def prepare(self,jid):
         j=self.store.job(jid); p=self.profile(); s=self.settings()
+        require_available(j,s)
         packet=build_packet(self.store.directory,p,j,s['model'],s['use_ai'],structured=s['structured_tailoring'])
         if j['status'] in ('new','prepared','queued'): self.store.status(jid,'prepared')
         self.store.event('prepared',f'Prepared an evidence-based resume for {j["company"]}',jid)
@@ -228,6 +238,7 @@ class Service:
         if not fresh:
             self.store.status(jid,'closed'); raise ValueError('Job is no longer in the employer feed')
         fresh['id']=jid; self.store.upsert_job(fresh); job=self.store.job(jid)
+        require_available(job,s)
         match=evaluate(p,job,s)
         if not match['eligible']: raise ValueError('; '.join(match['blockers']))
         if s['use_ai']:
@@ -247,6 +258,7 @@ class Service:
         packet=self.prepare(jid)
         s=self.settings()
         if not s['auto_submit']: raise ValueError('Automatic submission was paused')
+        require_available(job,s)
         latest_match=evaluate(p,job,s)
         if not latest_match['eligible']: raise ValueError('; '.join(latest_match['blockers']))
         day=datetime.now(tz(s['timezone'])).date().isoformat()
@@ -305,13 +317,17 @@ class Service:
         return {'task_id':key}
 
     def _schedule(self):
-        last_mail=0
+        last_mail=0;last_freshness_sync=0
         while not self.stopped.wait(20):
             s=self.settings(); local=datetime.now(tz(s['timezone'])); day=local.date().isoformat()
+            checked=timestamp(self.store.get('last_sync'))
             if s['schedule_enabled'] and local.strftime('%H:%M')>=s['run_at'] and self.store.get('last_cycle_day')!=day and not self.lock.locked():
                 try:
                     self.task('cycle'); self.store.set('last_cycle_day',day)
                 except ValueError: pass
+            elif s['fresh_only'] and s['schedule_enabled'] and s['boards'] and not self.lock.locked() and time.monotonic()-last_freshness_sync>3600 and (not checked or datetime.now(timezone.utc)-checked>timedelta(hours=1)):
+                try:self.task('sync');last_freshness_sync=time.monotonic()
+                except ValueError:pass
             elif s['mail_enabled'] and time.monotonic()-last_mail>300 and not self.lock.locked():
                 try: self.task('inbox'); last_mail=time.monotonic()
                 except ValueError: pass
