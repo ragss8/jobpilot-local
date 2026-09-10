@@ -50,6 +50,7 @@ interface Runtime {
   setLights: (on: boolean) => void;
   capture: () => void;
   lock: () => void;
+  rideLift: (index: number) => void;
 }
 export default function Viewer({
   project: p,
@@ -90,6 +91,7 @@ export default function Viewer({
     [activeRoom, setActiveRoom] = useState(initialRoom(p, floor).id),
     [position, setPosition] = useState({ x: 0, z: 0, yaw: 0 }),
     [tour, setTour] = useState(false),
+    [ridingLift, setRidingLift] = useState(false),
     [notice, setNotice] = useState("");
   const walkRef = useRef(walk),
     moodRef = useRef(mood),
@@ -100,7 +102,7 @@ export default function Viewer({
   paletteRef.current = palette;
   lightsRef.current = lights;
   const current =
-    floor.rooms.find((r) => r.id === activeRoom) ?? initialRoom(p, floor),
+      floor.rooms.find((r) => r.id === activeRoom) ?? initialRoom(p, floor),
     rooms = floor.rooms.filter((r) => r.type !== "hall");
   const go = (id: string) => {
     if (runtime.current?.navigate(id)) {
@@ -268,6 +270,13 @@ export default function Viewer({
       lastRoom = "",
       lastPosition = 0,
       previous = performance.now();
+    let liftTravel: {
+      from: number;
+      to: number;
+      started: number;
+      duration: number;
+      destination: number;
+    } | null = null;
     const keys = new Set<string>();
     const valid = (x: number, z: number, i = level) =>
       canWalk(x, z, p, floorOf(i), wallsOf(i)) &&
@@ -319,18 +328,23 @@ export default function Viewer({
     };
     /** Settle on the storey whose floor the walker is standing at or above. */
     const settleLevel = () => {
-      while (level + 1 < p.floors.length && walkerY >= floorBase(p, level + 1) - 0.06)
+      while (
+        level + 1 < p.floors.length &&
+        walkerY >= floorBase(p, level + 1) - 0.06
+      )
         level++;
       while (level > 0 && walkerY < floorBase(p, level) - 0.06) level--;
     };
     const setWalk = (next: boolean) => {
       if (next === walking) return;
+      liftTravel = null;
+      setRidingLift(false);
       walking = next;
       controls.enabled = !next;
       showLevels();
       keys.clear();
       if (next) {
-        const r = initialRoom(p, floor);
+        const r = initialRoom(p, p.floors[level]);
         navigate(r.id);
       } else {
         if (document.pointerLockElement === renderer.domElement)
@@ -341,6 +355,8 @@ export default function Viewer({
       }
     };
     const navigate = (id: string) => {
+      liftTravel = null;
+      setRidingLift(false);
       const at = p.floors.findIndex((f) => f.rooms.some((r) => r.id === id));
       if (at < 0) return false;
       const target = p.floors[at];
@@ -473,6 +489,39 @@ export default function Viewer({
         showLevels();
         if (walking) navigate(initialRoom(p, p.floors[i]).id);
       },
+      rideLift: (destination: number) => {
+        const source = p.floors[level].rooms.find((r) => r.type === "lift");
+        const target = p.floors[destination]?.rooms.find(
+          (r) => r.type === "lift",
+        );
+        if (
+          !walking ||
+          liftTravel ||
+          !source ||
+          !target ||
+          destination === level ||
+          target.name.includes("no terrace stop")
+        )
+          return;
+        if (
+          camera.position.x < source.x ||
+          camera.position.x > source.x + source.w ||
+          camera.position.z < source.y ||
+          camera.position.z > source.y + source.d
+        )
+          return;
+        keys.clear();
+        setTour(false);
+        setRidingLift(true);
+        liftTravel = {
+          from: walkerY,
+          to: floorBase(p, destination),
+          started: performance.now(),
+          duration: 1800 + Math.abs(destination - level) * 800,
+          destination,
+        };
+        setNotice(`Elevator to ${p.floors[destination].name}`);
+      },
       navigate,
       setWalk,
       setMood,
@@ -557,12 +606,28 @@ export default function Viewer({
       const now = performance.now(),
         dt = Math.min((now - previous) / 1000, 0.05);
       previous = now;
-      if (walking) {
+      if (walking && liftTravel) {
+        const trip = liftTravel,
+          t = Math.min(1, (now - trip.started) / trip.duration),
+          eased = t * t * (3 - 2 * t);
+        walkerY = trip.from + (trip.to - trip.from) * eased;
+        camera.position.y = walkerY + EYE;
+        if (t === 1) {
+          level = trip.destination;
+          liftTravel = null;
+          setRidingLift(false);
+          showLevels();
+          onFloorChange?.(level);
+          const cabin = p.floors[level].rooms.find((r) => r.type === "lift");
+          if (cabin) setActiveRoom(cabin.id);
+          setNotice(`Arrived at ${p.floors[level].name}`);
+        }
+      } else if (walking) {
         if (keys.has("ArrowLeft")) yaw += dt * 1.1;
         if (keys.has("ArrowRight")) yaw -= dt * 1.1;
         let forward =
-          Number(keys.has("KeyW") || keys.has("ArrowUp")) -
-          Number(keys.has("KeyS") || keys.has("ArrowDown")),
+            Number(keys.has("KeyW") || keys.has("ArrowUp")) -
+            Number(keys.has("KeyS") || keys.has("ArrowDown")),
           side = Number(keys.has("KeyD")) - Number(keys.has("KeyA"));
         const length = Math.hypot(forward, side) || 1;
         forward /= length;
@@ -763,6 +828,32 @@ export default function Viewer({
           <small>Click a room to enter</small>
         </div>
       )}
+      {walk &&
+        current.type === "lift" &&
+        !current.name.includes("no terrace stop") && (
+          <div className="lift-controls" aria-label="Elevator controls">
+            <b>
+              {ridingLift ? "Elevator moving…" : "Elevator · choose a floor"}
+            </b>
+            <div>
+              {p.floors.map(
+                (f, i) =>
+                  f.rooms.some(
+                    (r) =>
+                      r.type === "lift" && !r.name.includes("no terrace stop"),
+                  ) && (
+                    <button
+                      key={f.id}
+                      disabled={ridingLift || f.id === floor.id}
+                      onClick={() => runtime.current?.rideLift(i)}
+                    >
+                      {f.name}
+                    </button>
+                  ),
+              )}
+            </div>
+          </div>
+        )}
       {settings && (
         <aside className="interior-settings">
           <div className="settings-heading">

@@ -21,7 +21,8 @@ function StairDrawing({ room: r }: { room: Room }) {
   const lines = [];
   for (let side = 0; side < 2; side++)
     for (let i = 1; i < treads; i++) {
-      const at = side === 0 ? 0.3 + (i * run) / treads : span - 0.3 - (i * run) / treads;
+      const at =
+        side === 0 ? 0.3 + (i * run) / treads : span - 0.3 - (i * run) / treads;
       const a = side === 0 ? 0.15 : half,
         b = side === 0 ? half : across - 0.15;
       lines.push(
@@ -32,7 +33,19 @@ function StairDrawing({ room: r }: { room: Room }) {
     }
   const mid = along === "v" ? r.x + half : r.y + half;
   return (
-    <g pointerEvents="none" stroke="#8d9686" strokeWidth=".07" fill="none">
+    <g
+      transform={
+        r.stairReverse
+          ? along === "v"
+            ? `translate(0 ${2 * r.y + r.d}) scale(1 -1)`
+            : `translate(${2 * r.x + r.w} 0) scale(-1 1)`
+          : undefined
+      }
+      pointerEvents="none"
+      stroke="#8d9686"
+      strokeWidth=".07"
+      fill="none"
+    >
       <path d={lines.join(" ")} />
       <path
         d={
@@ -62,7 +75,22 @@ function FurnitureDrawing({ item: f }: { item: Furniture }) {
       strokeWidth=".055"
       fill="#f9f6ef"
     >
-      {f.kind === "bed" ? (
+      {f.kind === "jacuzzi" ? (
+        <>
+          <rect width={f.w} height={f.d} rx=".8" fill="#d8d7ca" />
+          <rect
+            x=".45"
+            y=".45"
+            width={f.w - 0.9}
+            height={f.d - 0.9}
+            rx=".65"
+            fill="#83c9d0"
+          />
+          {[1.3, 3, 4.7].map((x) => (
+            <circle key={x} cx={x} cy="1.2" r=".14" fill="white" />
+          ))}
+        </>
+      ) : f.kind === "bed" ? (
         <>
           <rect width={f.w} height={f.d} rx=".2" fill="#c6b89c" />
           <rect x=".15" y=".35" width={f.w - 0.3} height={f.d - 0.5} rx=".2" />
@@ -129,7 +157,14 @@ function FurnitureDrawing({ item: f }: { item: Furniture }) {
           />
           {[0.2, 0.78].map((t) => (
             <g key={t}>
-              <rect x="0" y={f.d * t} width=".45" height="1.5" rx=".2" fill="#5c5f5a" />
+              <rect
+                x="0"
+                y={f.d * t}
+                width=".45"
+                height="1.5"
+                rx=".2"
+                fill="#5c5f5a"
+              />
               <rect
                 x={f.w - 0.45}
                 y={f.d * t}

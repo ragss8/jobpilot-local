@@ -43,8 +43,8 @@ export function roomView(p: Project, f: Floor, r: Room) {
     const width = along ? r.w : r.d,
       edge = along ? r.x : r.y;
     const across = edge + width * (s.upperSide ? 0.75 : 0.25);
-    const at = s.from + s.arrival * 0.5,
-      up = s.from + s.arrival + s.run * 0.5;
+    const at = s.from + s.direction * s.arrival * 0.5,
+      up = s.from + s.direction * (s.arrival + s.run * 0.5);
     const x = along ? across : at,
       z = along ? at : across;
     if (canWalk(x, z, p, f, walls))

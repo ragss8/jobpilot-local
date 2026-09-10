@@ -3,7 +3,7 @@
  *  validated against a strict guard and then repaired by `normalizeBrief`,
  *  which owns the decisions a language model is not reliable about. */
 import type { Direction, FloorRole, Project, RoomType } from "./engine";
-export const OLLAMA_HOST = "http://127.0.0.1:11434";
+export const OLLAMA_HOST = "/ollama";
 /** Spaces a brief may ask for. `stairs` is deliberately absent: the generator
  *  always places the vertical core itself, so the model cannot forget it or
  *  put one on the terrace. */
@@ -24,6 +24,7 @@ export const briefSpaceTypes = [
   "seating",
   "garden",
   "balcony",
+  "jacuzzi",
 ] as const;
 export type BriefSpaceType = (typeof briefSpaceTypes)[number];
 export interface SpaceRequest {
@@ -39,6 +40,10 @@ export interface FloorBrief {
   spaces: SpaceRequest[];
 }
 export interface Brief {
+  lift?: boolean;
+  liftToTerrace?: boolean;
+  shelter?: boolean;
+  assumptions?: string[];
   site: { width: number; depth: number; facing: Direction };
   floors: FloorBrief[];
 }
@@ -51,6 +56,10 @@ export const MAX_FLOORS = 5,
 export const briefSchema = {
   type: "object",
   properties: {
+    lift: { type: "boolean" },
+    liftToTerrace: { type: "boolean" },
+    shelter: { type: "boolean" },
+    assumptions: { type: "array", items: { type: "string" } },
     site: {
       type: "object",
       properties: {
@@ -78,13 +87,7 @@ export const briefSchema = {
                 attachedBath: { type: "boolean" },
                 open: { type: "boolean" },
               },
-              required: [
-                "type",
-                "count",
-                "spacious",
-                "attachedBath",
-                "open",
-              ],
+              required: ["type", "count", "spacious", "attachedBath", "open"],
             },
           },
         },
@@ -92,11 +95,27 @@ export const briefSchema = {
       },
     },
   },
-  required: ["site", "floors"],
+  required: [
+    "site",
+    "floors",
+    "lift",
+    "liftToTerrace",
+    "shelter",
+    "assumptions",
+  ],
 };
 export const SYSTEM_PROMPT = `Extract a structured architectural program from an Indian residential design brief.
 
 RULES:
+- You interpret requirements only; never return coordinates or room sizes.
+- elevator/lift => lift=true. liftToTerrace=true ONLY when explicitly asked; otherwise it stops at the top residential floor.
+- jacuzzi/hot tub => jacuzzi on its requested floor. Covered shelter/pergola => shelter=true and a seating space on the terrace.
+- G+3 means ground + first + second + third. A terrace above that is a FIFTH level, never a replacement for the third floor.
+- "two rooms" on a sleeping floor means two bedrooms. "hall" means living.
+- Preserve every explicitly requested floor, space and count. Do not drop features to make them fit.
+- Missing facing defaults to South; note this in assumptions. Dimensions are in feet unless explicitly stated. Convert metres to feet.
+- Keep shared bathrooms separate from attached bathrooms.
+- Follow-up instructions update the supplied previous program; preserve everything else.
 - Emit ONLY spaces the user asked for. Never invent rooms. Never emit stairs or a staircase: the generator adds the vertical core itself.
 - Use type 'master' when the user says master bedroom or suite. Use 'bedroom' otherwise.
 - spacious=true ONLY if the user said spacious/large/big about that space. Otherwise false.
@@ -151,7 +170,7 @@ export interface OllamaStatus {
 }
 export async function checkOllama(host = OLLAMA_HOST): Promise<OllamaStatus> {
   try {
-    const models = await listModels(host);
+    const models = await listModels(host, AbortSignal.timeout(5000));
     if (!models.length)
       return {
         ok: false,
@@ -187,11 +206,11 @@ export async function extractBrief(
       model,
       stream: false,
       think: false,
-      options: { temperature: 0, num_ctx: 8192 },
+      options: { temperature: 0, num_ctx: 8192, num_predict: 2200 },
       format: briefSchema,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: text.slice(0, 6000) },
+        { role: "user", content: text.slice(0, 22000) },
       ],
     }),
   });
@@ -206,7 +225,18 @@ export async function extractBrief(
   } catch {
     throw Error("The model did not return valid JSON. Try again.");
   }
-  return validateBrief(raw);
+  const parsed = validateBrief(raw);
+  const original = raw as Brief;
+  if (
+    original.floors.length !== parsed.floors.length ||
+    original.floors.some(
+      (f, i) => f.spaces.length !== parsed.floors[i].spaces.length,
+    )
+  )
+    throw Error(
+      "The model returned unsupported or excessive spaces. Please clarify your floor program; no rooms have been silently discarded.",
+    );
+  return parsed;
 }
 /** Strict guard over model output, in the same spirit as `parseProject`. */
 export function validateBrief(raw: unknown): Brief {
@@ -253,7 +283,18 @@ export function validateBrief(raw: unknown): Brief {
     }
     floors.push({ label: f.label.slice(0, 60), role: f.role, spaces });
   }
-  return { site: { ...b.site }, floors };
+  return {
+    site: { ...b.site },
+    floors,
+    lift: b.lift === true,
+    liftToTerrace: b.liftToTerrace === true,
+    shelter: b.shelter === true,
+    assumptions: Array.isArray(b.assumptions)
+      ? b.assumptions
+          .filter((x): x is string => typeof x === "string")
+          .slice(0, 12)
+      : [],
+  };
 }
 const BEDS: BriefSpaceType[] = ["bedroom", "master"];
 /** Repairs the model is not reliable enough to be trusted with. Structural
@@ -346,15 +387,17 @@ export function describeBrief(brief: Brief) {
 }
 export function label(s: { type: BriefSpaceType }) {
   return (
-    {
-      master: "master bedroom",
-      theatre: "home theatre",
-      pooja: "pooja room",
-      seating: "seating area",
-      garden: "landscaping",
-      living: "living hall",
-    } as Partial<Record<BriefSpaceType, string>>
-  )[s.type] ?? s.type;
+    (
+      {
+        master: "master bedroom",
+        theatre: "home theatre",
+        pooja: "pooja room",
+        seating: "seating area",
+        garden: "landscaping",
+        living: "living hall",
+      } as Partial<Record<BriefSpaceType, string>>
+    )[s.type] ?? s.type
+  );
 }
 /** Merge a brief into a project's site and requirements, leaving the caller
  *  to generate the floors. */

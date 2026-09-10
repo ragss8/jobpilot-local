@@ -49,6 +49,7 @@ export const SITE_TOO_SMALL =
   "This site is too narrow for a corridor with rooms on both sides. Increase the site or reduce the setbacks.";
 /** Comfortable target areas in square feet, before the site is apportioned. */
 const AREA: Record<BriefSpaceType, number> = {
+  jacuzzi: 80,
   living: 210,
   bedroom: 135,
   master: 170,

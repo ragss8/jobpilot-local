@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import {
+  isOpen,
   floorBase,
   floorBounds,
   stairRun,
@@ -11,7 +12,13 @@ import {
   type Room,
 } from "./engine";
 import { createMaterials } from "./materials";
-export type Obstacle = { x: number; z: number; w: number; d: number; level: number };
+export type Obstacle = {
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  level: number;
+};
 export interface Level {
   id: string;
   base: number;
@@ -293,64 +300,79 @@ export function buildInterior(
         r.d,
         mats.flooring(r.material, r.w, r.d),
       );
-      box(
-        r.x + r.w / 2,
-        floor.height + 0.07,
-        r.y + r.d / 2,
-        r.w,
-        0.14,
-        r.d,
-        m.ceiling,
-        ceilings,
-      );
-      for (const z of [r.y + 0.15, r.y + r.d - 0.15])
+      if (floor.role !== "terrace" || !isOpen(r.type)) {
         box(
           r.x + r.w / 2,
-          floor.height - 0.16,
-          z,
-          r.w - 0.2,
-          0.25,
-          0.25,
-          m.trim,
-          ceilings,
-        );
-      for (const x of [r.x + 0.15, r.x + r.w - 0.15])
-        box(
-          x,
-          floor.height - 0.16,
+          floor.height + 0.07,
           r.y + r.d / 2,
-          0.25,
-          0.25,
-          r.d - 0.2,
-          m.trim,
+          r.w,
+          0.14,
+          r.d,
+          m.ceiling,
           ceilings,
         );
-      const light = new THREE.PointLight(
-        "#ffe6bd",
-        r.w * r.d * 1.3,
-        Math.max(r.w, r.d) * 1.5,
-        2,
-      );
-      light.position.set(r.x + r.w / 2, floor.height - 1, r.y + r.d / 2);
-      lights.add(light);
-      const nx = Math.max(1, Math.round(r.w / 7)),
-        nz = Math.max(1, Math.round(r.d / 7));
-      for (let ix = 0; ix < nx; ix++)
-        for (let iz = 0; iz < nz; iz++) {
-          const x = r.x + (r.w * (ix + 0.5)) / nx,
-            z = r.y + (r.d * (iz + 0.5)) / nz;
-          cyl(x, floor.height - 0.025, z, 0.22, 0.04, m.brass, ceilings);
-          const lamp = cyl(
-            x,
-            floor.height - 0.055,
+        for (const z of [r.y + 0.15, r.y + r.d - 0.15])
+          box(
+            r.x + r.w / 2,
+            floor.height - 0.16,
             z,
-            0.17,
-            0.015,
-            m.light,
+            r.w - 0.2,
+            0.25,
+            0.25,
+            m.trim,
             ceilings,
           );
-          lamp.castShadow = false;
-        }
+        for (const x of [r.x + 0.15, r.x + r.w - 0.15])
+          box(
+            x,
+            floor.height - 0.16,
+            r.y + r.d / 2,
+            0.25,
+            0.25,
+            r.d - 0.2,
+            m.trim,
+            ceilings,
+          );
+        const light = new THREE.PointLight(
+          "#ffe6bd",
+          r.w * r.d * 1.3,
+          Math.max(r.w, r.d) * 1.5,
+          2,
+        );
+        light.position.set(r.x + r.w / 2, floor.height - 1, r.y + r.d / 2);
+        lights.add(light);
+        const nx = Math.max(1, Math.round(r.w / 7)),
+          nz = Math.max(1, Math.round(r.d / 7));
+        for (let ix = 0; ix < nx; ix++)
+          for (let iz = 0; iz < nz; iz++) {
+            const x = r.x + (r.w * (ix + 0.5)) / nx,
+              z = r.y + (r.d * (iz + 0.5)) / nz;
+            cyl(x, floor.height - 0.025, z, 0.22, 0.04, m.brass, ceilings);
+            const lamp = cyl(
+              x,
+              floor.height - 0.055,
+              z,
+              0.17,
+              0.015,
+              m.light,
+              ceilings,
+            );
+            lamp.castShadow = false;
+          }
+      }
+      if (r.type === "lift") {
+        // Open cabin entrance; the reserved shaft is identical at every level.
+        box(r.x + r.w / 2, 3.8, r.y + 0.25, r.w - 0.5, 7.5, 0.1, m.glass);
+        box(r.x + r.w - 0.3, 3.9, r.y + r.d - 0.8, 0.15, 1.2, 0.45, m.black);
+        for (let button = 0; button < 4; button++)
+          sphere(
+            r.x + r.w - 0.4,
+            3.5 + button * 0.22,
+            r.y + r.d - 0.78,
+            0.055,
+            m.light,
+          );
+      }
       if (!showFurniture) continue;
       for (const f of r.furniture) {
         const g = new THREE.Group();
@@ -551,7 +573,15 @@ export function buildInterior(
           const panels = Math.max(2, Math.round(f.w / 1.8));
           for (let i = 0; i < panels; i++) {
             const x = -f.w / 2 + ((i + 0.5) * f.w) / panels;
-            b(x, 3.6, f.d / 2 + 0.02, f.w / panels - 0.04, 7.05, 0.06, m.cabinet);
+            b(
+              x,
+              3.6,
+              f.d / 2 + 0.02,
+              f.w / panels - 0.04,
+              7.05,
+              0.06,
+              m.cabinet,
+            );
             b(x + 0.1, 3.4, f.d / 2 + 0.08, 0.025, 0.7, 0.04, m.brass);
           }
         } else if (f.kind === "toilet") {
@@ -596,7 +626,16 @@ export function buildInterior(
           b(0, 0.85, 0, f.w * 0.92, 1.1, f.d * 0.9, m.fabric, 0.3);
           b(0, 1.9, f.d / 2 - 0.42, f.w * 0.92, 2, 0.72, m.fabric, 0.3);
           for (const sx of [-1, 1])
-            b(sx * (f.w / 2 - 0.2), 1.6, 0, 0.34, 1, f.d * 0.86, m.accent, 0.16);
+            b(
+              sx * (f.w / 2 - 0.2),
+              1.6,
+              0,
+              0.34,
+              1,
+              f.d * 0.86,
+              m.accent,
+              0.16,
+            );
           b(0, 1.3, -f.d / 2 - 0.18, f.w * 0.5, 0.3, 0.7, m.fabric, 0.14);
         } else if (f.kind === "screen") {
           b(0, 5.1, 0, f.w, 3.4, 0.18, m.black, 0.05);
@@ -636,6 +675,21 @@ export function buildInterior(
           door.position.set(0, 1.85, -f.d / 2 + 0.42);
           g.add(door);
           b(0, 3.05, -f.d / 2 + 0.3, f.w * 0.7, 0.24, 0.1, m.black, 0.04);
+        } else if (f.kind === "jacuzzi") {
+          b(0, 0.25, 0, f.w, 0.5, f.d, m.stone, 0.25);
+          for (const side of [-1, 1]) {
+            b(side * (f.w / 2 - 0.22), 1.25, 0, 0.44, 2.2, f.d, m.stone, 0.12);
+            b(0, 1.25, side * (f.d / 2 - 0.22), f.w, 2.2, 0.44, m.stone, 0.12);
+          }
+          const water = mats.standard({
+            color: "#61c4cf",
+            roughness: 0.12,
+            metalness: 0.15,
+            transparent: true,
+            opacity: 0.85,
+          });
+          b(0, 1.9, 0, f.w - 0.85, 0.07, f.d - 0.85, water, 0.25);
+          for (const x of [-1.7, 0, 1.7]) c(x, 1.97, -1.8, 0.1, 0.03, m.light);
         } else if (f.kind === "shower") {
           b(0, 0.06, 0, f.w, 0.12, f.d, m.stone);
           for (const [dx, dz, w, d] of [
@@ -646,7 +700,14 @@ export function buildInterior(
             pane.castShadow = false;
           }
           c(f.w / 2 - 0.5, 4.2, f.d / 2 - 0.5, 0.06, 3.2, m.brass);
-          const head = c(f.w / 2 - 0.5, 5.85, f.d / 2 - 1.1, 0.42, 0.1, m.brass);
+          const head = c(
+            f.w / 2 - 0.5,
+            5.85,
+            f.d / 2 - 1.1,
+            0.42,
+            0.1,
+            m.brass,
+          );
           head.rotation.x = 0.25;
         } else if (f.kind === "pergola") {
           for (const sx of [-1, 1])
@@ -729,7 +790,13 @@ export function buildInterior(
           w: width + 1,
           d: 0.9,
         });
-        art(r.x + r.w * 0.38, 5.45, r.y + 0.25, Math.min(3.2, r.w * 0.28), 2.35);
+        art(
+          r.x + r.w * 0.38,
+          5.45,
+          r.y + 0.25,
+          Math.min(3.2, r.w * 0.28),
+          2.35,
+        );
       } else if (r.type === "bedroom" || r.type === "master") {
         art(r.x + r.w * 0.7, 5.35, r.y + 0.25, 1.7, 2.1);
       }
@@ -750,7 +817,13 @@ export function buildInterior(
           )
         ) {
           plant(x, z, 0.85);
-          obstacles.push({ level: levelIndex, x: x - 0.55, z: z - 0.55, w: 1.1, d: 1.1 });
+          obstacles.push({
+            level: levelIndex,
+            x: x - 0.55,
+            z: z - 0.55,
+            w: 1.1,
+            d: 1.1,
+          });
         }
       }
       if (r.type === "bathroom" && r.w > 6) {
@@ -758,7 +831,13 @@ export function buildInterior(
         box(r.x + 1.3, 3.1, r.y + r.d - 0.8, 1.7, 0.12, 1.25, m.stone);
         cyl(r.x + 1.3, 3.28, r.y + r.d - 0.8, 0.5, 0.27, m.white, root, 0.6);
         box(r.x + 1.3, 5, r.y + r.d - 0.25, 1.65, 2.2, 0.045, m.glass);
-        obstacles.push({ level: levelIndex, x: r.x + 0.35, z: r.y + r.d - 1.5, w: 1.9, d: 1.4 });
+        obstacles.push({
+          level: levelIndex,
+          x: r.x + 0.35,
+          z: r.y + r.d - 1.5,
+          w: 1.9,
+          d: 1.4,
+        });
       }
     }
     // A flight up to the next storey, and the slab it pierces.
@@ -773,9 +852,9 @@ export function buildInterior(
     const s = stairRun(core);
     const along = s.axis === "z";
     box(
-      along ? core.x + core.w / 2 : core.x + s.arrival / 2,
+      along ? core.x + core.w / 2 : s.from + (s.direction * s.arrival) / 2,
       -0.04,
-      along ? core.y + s.arrival / 2 : core.y + core.d / 2,
+      along ? s.from + (s.direction * s.arrival) / 2 : core.y + core.d / 2,
       along ? core.w : s.arrival,
       0.18,
       along ? s.arrival : core.d,
@@ -795,7 +874,7 @@ export function buildInterior(
     /** Centre of a flight across the core: true = the far side of `mid`. */
     const sideAt = (far: boolean) => base + (far ? half * 1.5 : half * 0.5);
     const tread = (at: number, far: boolean, y: number) => {
-      const a = s.from + s.arrival + at + step / 2,
+      const a = s.from + s.direction * (s.arrival + at + step / 2),
         b = sideAt(far);
       box(
         along ? b : a,
@@ -807,9 +886,9 @@ export function buildInterior(
         m.stone,
       );
       box(
-        along ? b : a - step / 2,
+        along ? b : a - (s.direction * step) / 2,
         y - rise / 2 - 0.13,
-        along ? a - step / 2 : b,
+        along ? a - (s.direction * step) / 2 : b,
         along ? half - 0.12 : 0.12,
         rise,
         along ? 0.12 : half - 0.12,
@@ -824,9 +903,13 @@ export function buildInterior(
     }
     // The half-landing where the flights turn.
     box(
-      along ? core.x + core.w / 2 : core.x + core.w - s.landing / 2,
+      along
+        ? core.x + core.w / 2
+        : s.from + s.direction * (s.arrival + s.run + s.landing / 2),
       height / 2 - 0.09,
-      along ? core.y + core.d - s.landing / 2 : core.y + core.d / 2,
+      along
+        ? s.from + s.direction * (s.arrival + s.run + s.landing / 2)
+        : core.y + core.d / 2,
       along ? core.w : s.landing,
       0.18,
       along ? s.landing : core.d,
@@ -835,7 +918,7 @@ export function buildInterior(
     // A handrail over each flight, sloped to match its climb.
     const angle = Math.atan2(height / 2, s.run),
       railLen = Math.hypot(s.run, height / 2),
-      midAlong = s.from + s.arrival + s.run / 2;
+      midAlong = s.from + s.direction * (s.arrival + s.run / 2);
     for (const climbing of [true, false]) {
       const rail = box(
         along ? s.mid : midAlong,
@@ -846,13 +929,13 @@ export function buildInterior(
         along ? railLen : 0.11,
         m.brass,
       );
-      const dir = climbing ? 1 : -1;
+      const dir = (climbing ? 1 : -1) * s.direction;
       if (along) rail.rotation.x = -dir * angle;
       else rail.rotation.z = dir * angle;
     }
     for (let i = 0; i <= 6; i++) {
       const t = i / 6,
-        at = s.from + s.arrival + t * s.run;
+        at = s.from + s.direction * (s.arrival + t * s.run);
       for (const climbing of [true, false]) {
         const deck = climbing ? (height / 2) * t : height - (height / 2) * t;
         cyl(
@@ -906,8 +989,14 @@ export function buildInterior(
         const out = onWest ? -1 : onEast ? 1 : onNorth ? -1 : 1;
         const len = o.end - o.start + 1.6,
           reach = 1.5;
-        const cx = o.axis === "h" ? (o.start + o.end) / 2 : o.fixed + (out * reach) / 2,
-          cz = o.axis === "h" ? o.fixed + (out * reach) / 2 : (o.start + o.end) / 2;
+        const cx =
+            o.axis === "h"
+              ? (o.start + o.end) / 2
+              : o.fixed + (out * reach) / 2,
+          cz =
+            o.axis === "h"
+              ? o.fixed + (out * reach) / 2
+              : (o.start + o.end) / 2;
         box(
           cx,
           base + 7.35,
@@ -958,7 +1047,11 @@ export function buildInterior(
     }
     // The compound wall belongs to the site, not to any one storey.
     root = scene;
-    const gateAt = { x: p.site.width / 2, z: p.site.depth / 2 };
+    const parking = p.floors[0]?.rooms.find((r) => r.type === "parking");
+    const gateAt = {
+      x: parking ? parking.x + parking.w / 2 : p.site.width / 2,
+      z: parking ? parking.y + parking.d / 2 : p.site.depth / 2,
+    };
     const road = p.site.facing;
     const edges = [
       ["h", 0, 0, p.site.width, road === "North"],
@@ -999,18 +1092,6 @@ export function buildInterior(
           1.1,
           plaster,
         );
-      for (let i = 0; i < 11; i++) {
-        const at = centre - gap / 2 + 0.8 + (i * (gap - 1.6)) / 10;
-        box(
-          axis === "h" ? at : fixed,
-          2.3,
-          axis === "h" ? fixed : at,
-          axis === "h" ? 0.16 : 0.3,
-          4.4,
-          axis === "h" ? 0.3 : 0.16,
-          m.black,
-        );
-      }
       // The apron runs from the gate to the face of the house, not under it.
       if (!rect) continue;
       const near =

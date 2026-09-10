@@ -17,7 +17,9 @@ export type RoomType =
   | "terrace"
   | "seating"
   | "garden"
-  | "balcony";
+  | "balcony"
+  | "lift"
+  | "jacuzzi";
 export type Material = "marble" | "wood" | "terrazzo" | "tile";
 export type Direction = "North" | "East" | "South" | "West";
 /** Levels stack in array order. A stilt is the open parking ground level, a
@@ -40,6 +42,7 @@ export const furnitureKinds = [
   "washer",
   "pergola",
   "shower",
+  "jacuzzi",
 ] as const;
 export interface Furniture {
   id: string;
@@ -63,6 +66,7 @@ export interface Room {
   doorSide: "n" | "e" | "s" | "w";
   doorOffset: number;
   windowOffset: number;
+  stairReverse?: boolean;
 }
 export interface Floor {
   id: string;
@@ -114,6 +118,8 @@ export const PARAPET = 3.5;
  *  identical on every level and the flights stack. */
 export const STAIR = { w: 8, d: 13, tread: 0.9, riser: 0.58 };
 export const roomColors: Record<RoomType, string> = {
+  lift: "#cbd4df",
+  jacuzzi: "#b9deda",
   living: "#ede3d1",
   bedroom: "#e8e3db",
   master: "#e4ded2",
@@ -136,13 +142,12 @@ export const roomColors: Record<RoomType, string> = {
 };
 /** Ground level of a floor, in feet, from the heights of everything below it. */
 export function floorBase(p: Project, index: number) {
-  return round(
-    p.floors.slice(0, index).reduce((sum, f) => sum + f.height, 0),
-  );
+  return round(p.floors.slice(0, index).reduce((sum, f) => sum + f.height, 0));
 }
 /** Rooms that are enclosed and habitable: they need walls, a door, and
  *  ventilation. Open levels (parking, terrace decks, gardens) do not. */
 export const openRoomTypes: RoomType[] = [
+  "jacuzzi",
   "parking",
   "terrace",
   "seating",
@@ -219,6 +224,22 @@ export function furnish(r: Room): Furniture[] {
   if (r.type === "bathroom") {
     against("toilet", 2.2, 3);
     flank("shower", 3, 3);
+    if (!items.some((i) => i.kind === "toilet")) {
+      for (const [w, d] of [
+        [2.2, 3],
+        [3, 2.2],
+      ]) {
+        for (const [x, y] of [
+          [0.3, 0.3],
+          [r.w - w - 0.3, 0.3],
+          [0.3, r.d - d - 0.3],
+          [r.w - w - 0.3, r.d - d - 0.3],
+        ]) {
+          if (!items.some((i) => i.kind === "toilet"))
+            add("toilet", x, y, w, d);
+        }
+      }
+    }
   }
   if (r.type === "pooja") against("altar", Math.min(2.8, r.w - 1.4), 1.5);
   if (r.type === "office") flank("desk", Math.min(4, r.w - 1.4), 2);
@@ -233,8 +254,7 @@ export function furnish(r: Room): Furniture[] {
     const off = r.doorSide === "e" || r.doorSide === "s" ? 0.6 : undefined;
     for (let i = 0; i < n; i++) {
       const at = 0.6 + i * (pitch + 0.6);
-      const back =
-        off ?? Math.max(0.6, (acrossW ? r.d : r.w) - lane - 0.6);
+      const back = off ?? Math.max(0.6, (acrossW ? r.d : r.w) - lane - 0.6);
       if (acrossW) add("car", at, back, bay.w, bay.d);
       else add("car", back, at, bay.w, bay.d);
     }
@@ -260,7 +280,13 @@ export function furnish(r: Room): Furniture[] {
   if (r.type === "store") flank("wardrobe", Math.min(4, r.w - 1.4), 1.8);
   if (r.type === "seating") {
     against("sofa", Math.min(7, r.w - 1.4), 2.7);
-    add("table", Math.max(0.6, r.w / 2 - 1.6), Math.max(0.6, r.d / 2 - 0.9), 3.2, 1.8);
+    add(
+      "table",
+      Math.max(0.6, r.w / 2 - 1.6),
+      Math.max(0.6, r.d / 2 - 0.9),
+      3.2,
+      1.8,
+    );
     if (r.d > 12) add("pergola", 0.4, r.d - 10, Math.min(12, r.w - 0.8), 9.5);
   }
   if (r.type === "garden") {
@@ -268,6 +294,7 @@ export function furnish(r: Room): Furniture[] {
       add("planter", 0.5 + i * 4, 0.5, 3, 2);
     add("bench", Math.max(0.5, r.w / 2 - 2.5), r.d - 2.4, 5, 1.8);
   }
+  if (r.type === "jacuzzi") against("jacuzzi", 6, 6);
   if (r.type === "balcony")
     add("bench", Math.max(0.5, r.w / 2 - 2), Math.max(0.5, r.d - 2.2), 4, 1.6);
   return items;
@@ -465,15 +492,15 @@ export function getOpenings(p: Project, f: Floor): Opening[] {
       continue;
     }
     push(r, r.doorSide, r.doorOffset, 3, "door");
-    if (r.type === "hall") continue;
+    if (r.type === "hall" || r.type === "lift") continue;
     // Every enclosed room gets a window on an exterior edge it actually
     // touches. The road-facing edge wins where a room reaches it, so the
     // front of the house has openings rather than a blank wall; otherwise
     // any edge that is not already carrying the door.
     const exterior = exteriorSides(r, { minX, maxX, minY, maxY });
-    const front = (
-      { North: "n", South: "s", East: "e", West: "w" } as const
-    )[p.site.facing];
+    const front = ({ North: "n", South: "s", East: "e", West: "w" } as const)[
+      p.site.facing
+    ];
     const ranked = [...exterior].sort(
       (a, b) => Number(b === front) - Number(a === front),
     );
@@ -597,6 +624,7 @@ export function getWalls(p: Project, f: Floor): Wall[] {
 export interface StairRun {
   /** The direction the flights run in. */
   axis: "x" | "z";
+  direction: 1 | -1;
   /** Start of the core in that axis. */
   from: number;
   /** Depth of the arrival landing at the near end, level with this floor. */
@@ -625,7 +653,8 @@ export function stairRun(core: Room): StairRun {
     axis === "z" ? core.doorSide === "e" : core.doorSide === "s";
   return {
     axis,
-    from: axis === "z" ? core.y : core.x,
+    direction: core.stairReverse ? -1 : 1,
+    from: (axis === "z" ? core.y : core.x) + (core.stairReverse ? span : 0),
     arrival,
     landing,
     run: span - arrival - landing,
@@ -648,7 +677,7 @@ export function stairHeightAt(
   const s = stairRun(core);
   const along = s.axis === "z" ? z : x,
     across = s.axis === "z" ? x : z;
-  const t = (along - s.from - s.arrival) / s.run;
+  const t = (s.direction * (along - s.from) - s.arrival) / s.run;
   if (t <= 0) return 0;
   if (t >= 1) return height / 2;
   const climbing = across > s.mid === s.upperSide;
@@ -692,6 +721,8 @@ export function vastu(p: Project, f: Floor) {
 }
 /** Room types that are legitimately narrower than a habitable room. */
 const SLIM: RoomType[] = [
+  "lift",
+  "jacuzzi",
   "hall",
   "pooja",
   "bathroom",
@@ -764,6 +795,7 @@ export function validate(p: Project, f: Floor): string[] {
         !isOpen(r.type) &&
         r.type !== "hall" &&
         r.type !== "bathroom" &&
+        r.type !== "lift" &&
         !exteriorSides(r, bounds).length
       )
         errors.push(`${r.name} is landlocked, with no wall for a window.`);
@@ -849,6 +881,14 @@ export function canWalk(
   }
   for (const r of f.rooms)
     for (const item of r.furniture) {
+      if (item.kind === "pergola") {
+        // Its roof is overhead. Only the four posts block a walker.
+        for (const px of [item.x + 0.3, item.x + item.w - 0.3])
+          for (const py of [item.y + 0.3, item.y + item.d - 0.3])
+            if (Math.hypot(x - r.x - px, y - r.y - py) < radius + 0.16)
+              return false;
+        continue;
+      }
       const b = furnitureBounds(item);
       if (
         x > r.x + b.x - radius &&
@@ -898,13 +938,13 @@ export function parseProject(raw: unknown): Project {
     p.version !== 2 ||
     !str(p.name) ||
     !p.site ||
-    !num(p.site.width, 20, 150) ||
-    !num(p.site.depth, 25, 150) ||
+    !num(p.site.width, 15, 150) ||
+    !num(p.site.depth, 15, 150) ||
     !num(p.site.setback, 0, 15) ||
     !num(p.site.front, 0, 20) ||
     !["North", "South", "East", "West"].includes(p.site.facing) ||
     !p.requirements ||
-    !num(p.requirements.bedrooms, 1, 8) ||
+    !num(p.requirements.bedrooms, 0, 40) ||
     !str(p.requirements.style) ||
     !["Strict", "Balanced", "Off"].includes(p.requirements.vastu) ||
     !num(p.requirements.budget, 1, 10000) ||
@@ -947,6 +987,7 @@ export function parseProject(raw: unknown): Project {
         !["n", "e", "s", "w"].includes(r.doorSide) ||
         !num(r.doorOffset, 0, 1) ||
         !num(r.windowOffset, 0, 1) ||
+        (r.stairReverse !== undefined && typeof r.stairReverse !== "boolean") ||
         !Array.isArray(r.furniture) ||
         r.furniture.length > 30
       )
