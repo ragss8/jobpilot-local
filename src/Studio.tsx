@@ -5,9 +5,11 @@ import {
   Box,
   Download,
   Footprints,
+  History,
   House,
   Layers,
   LoaderCircle,
+  LogOut,
   MessageSquare,
   Plus,
   Ruler,
@@ -30,9 +32,14 @@ import {
   CHAT_KEY,
   emptyConversation,
   loadConversation,
-  resetArchitecture,
   type Conversation,
 } from "./studioStorage";
+import {
+  api,
+  ApiError,
+  type ConversationSummary,
+  type Session,
+} from "./api";
 import {
   parseProject,
   validate,
@@ -52,14 +59,43 @@ function download(name: string, body: string, type = "application/json") {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-export default function Studio() {
-  const [state, setState] = useState<Conversation>(() => {
+// Moves the conversation kept in this browser before accounts existed into
+// the first account that signs in here.
+let browserImport: Promise<void> | undefined;
+function importBrowserConversation(token: string) {
+  browserImport ??= (async () => {
+    let local: Conversation;
     try {
-      return loadConversation(localStorage);
+      local = loadConversation(localStorage);
+      localStorage.removeItem(CHAT_KEY);
     } catch {
-      return emptyConversation();
+      return;
     }
-  });
+    if (!local.messages.length) return;
+    try {
+      await api.saveConversation(token, crypto.randomUUID(), local);
+    } catch (e) {
+      try {
+        localStorage.setItem(CHAT_KEY, JSON.stringify(local));
+      } catch {}
+      browserImport = undefined;
+      throw e;
+    }
+  })();
+  return browserImport;
+}
+export default function Studio({
+  session,
+  onSignOut,
+}: {
+  session: Session;
+  onSignOut: () => void;
+}) {
+  const [state, setState] = useState<Conversation>(emptyConversation);
+  const [conversationId, setConversationId] = useState<string | null>(null),
+    [conversations, setConversations] = useState<ConversationSummary[]>([]),
+    [loading, setLoading] = useState(true),
+    [showHistory, setShowHistory] = useState(false);
   const [text, setText] = useState(""),
     [busy, setBusy] = useState(""),
     [storageError, setStorageError] = useState("");
@@ -71,43 +107,114 @@ export default function Studio() {
     [history, setHistory] = useState<Project[]>([]);
   const abort = useRef<AbortController | null>(null),
     end = useRef<HTMLDivElement>(null),
-    input = useRef<HTMLTextAreaElement>(null);
+    input = useRef<HTMLTextAreaElement>(null),
+    saved = useRef(new Map<string, string>()),
+    saving = useRef<Promise<void>>(Promise.resolve()),
+    pendingSave = useRef<(() => void) | null>(null);
   const [showProgram, setShowProgram] = useState(false);
   const project = state.result?.proposals[state.choice]?.project ?? null;
   const floor = project?.floors[Math.min(level, project.floors.length - 1)];
   const room = floor?.rooms.find((r) => r.id === selected);
+  function failed(e: unknown, message: string) {
+    if (e instanceof ApiError && e.status === 401) onSignOut();
+    else setStorageError(message);
+  }
   useEffect(() => {
     checkOllama().then(setAI);
-    return () => abort.current?.abort();
+    let cancelled = false;
+    importBrowserConversation(session.token)
+      .then(() => api.conversations(session.token))
+      .then(async (list) => {
+        if (cancelled) return;
+        setConversations(list);
+        if (list[0]) await open(list[0].id);
+      })
+      .catch(
+        (e) =>
+          !cancelled &&
+          failed(
+            e,
+            "Your saved conversations couldn't be loaded. Check that the API server is running, then reload.",
+          ),
+      )
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+      abort.current?.abort();
+    };
   }, []);
+  // Saves the open conversation shortly after it changes. Saves run one at a
+  // time so an older snapshot never lands after a newer one.
   useEffect(() => {
-    try {
-      if (state.messages.length)
-        localStorage.setItem(CHAT_KEY, JSON.stringify(state));
-      else localStorage.removeItem(CHAT_KEY);
-      setStorageError("");
-    } catch {
-      setStorageError(
-        "Browser storage is unavailable or full. Export your design to keep a copy.",
-      );
+    if (!state.messages.length) return;
+    if (!conversationId) {
+      setConversationId(crypto.randomUUID());
+      return;
     }
-  }, [state]);
+    const id = conversationId,
+      snapshot = state,
+      body = JSON.stringify(snapshot);
+    if (saved.current.get(id) === body) return;
+    const save = () => {
+      pendingSave.current = null;
+      saving.current = saving.current.then(() =>
+        api.saveConversation(session.token, id, snapshot).then(
+          (summary) => {
+            saved.current.set(id, body);
+            setStorageError("");
+            setConversations((list) => [
+              summary,
+              ...list.filter((c) => c.id !== id),
+            ]);
+          },
+          (e) =>
+            failed(
+              e,
+              "This conversation couldn't be saved to your account. Your latest changes are still on screen.",
+            ),
+        ),
+      );
+    };
+    pendingSave.current = save;
+    const timer = setTimeout(save, 700);
+    return () => {
+      clearTimeout(timer);
+      if (pendingSave.current === save) pendingSave.current = null;
+    };
+  }, [state, conversationId]);
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [state.messages, busy]);
-  function fresh() {
+  function resetView() {
+    pendingSave.current?.();
     abort.current?.abort();
     abort.current = null;
     setBusy("");
-    try {
-      resetArchitecture(localStorage);
-    } catch {}
-    setState(emptyConversation());
     setText("");
     setLevel(0);
     setSelected(null);
     setHistory([]);
     setMode("2d");
+    setShowHistory(false);
+  }
+  function fresh() {
+    resetView();
+    setConversationId(null);
+    setState(emptyConversation());
+  }
+  async function open(id: string) {
+    resetView();
+    try {
+      const conversation = await api.conversation(session.token, id);
+      for (const proposal of conversation.result?.proposals ?? [])
+        proposal.project = parseProject(proposal.project);
+      saved.current.set(id, JSON.stringify(conversation));
+      setConversationId(id);
+      setState(conversation);
+      setStorageError("");
+    } catch (e) {
+      failed(e, "That conversation couldn't be opened. Try again.");
+    }
   }
   async function submit() {
     if (!text.trim() || busy) return;
@@ -269,6 +376,14 @@ export default function Studio() {
       </div>
     </form>
   );
+  if (loading)
+    return (
+      <div className="studio">
+        <div className="loading-scene studio-loading" role="status">
+          Loading your conversations…
+        </div>
+      </div>
+    );
   return (
     <div className={`studio ${project ? "has-design" : ""}`}>
       <header className="studio-header">
@@ -282,7 +397,7 @@ export default function Studio() {
         <div className="studio-header-right">
           <span
             className={`model-status ${ai?.ok ? "connected" : ""}`}
-            title={ai?.error ?? "Your conversation stays on this computer"}
+            title={ai?.error ?? "The model runs on this computer"}
           >
             <i />
             {ai === null
@@ -291,9 +406,61 @@ export default function Studio() {
                 ? `${ai.model} · local`
                 : "Local AI offline"}
           </span>
+          <div className="history-menu">
+            <button
+              aria-expanded={showHistory}
+              onClick={() => setShowHistory(!showHistory)}
+            >
+              <History size={16} />
+              History
+            </button>
+            {showHistory && (
+              <nav className="history-panel" aria-label="Conversation history">
+                <b>YOUR CONVERSATIONS</b>
+                {conversations.length ? (
+                  conversations.map((c) => (
+                    <button
+                      key={c.id}
+                      className={c.id === conversationId ? "active" : ""}
+                      onClick={() => open(c.id)}
+                    >
+                      <span>{c.title}</span>
+                      <small>
+                        {new Date(c.updatedAt).toLocaleString()} ·{" "}
+                        {c.messageCount}{" "}
+                        {c.messageCount === 1 ? "message" : "messages"}
+                      </small>
+                    </button>
+                  ))
+                ) : (
+                  <p>No saved conversations yet.</p>
+                )}
+              </nav>
+            )}
+          </div>
           <button onClick={fresh}>
             <Plus size={16} />
             New conversation
+          </button>
+          <span className="account" title={session.user.email}>
+            {session.user.picture && (
+              <img
+                src={session.user.picture}
+                alt=""
+                referrerPolicy="no-referrer"
+              />
+            )}
+            <span>{session.user.name ?? session.user.email}</span>
+          </span>
+          <button
+            aria-label="Sign out"
+            title="Sign out"
+            onClick={() => {
+              pendingSave.current?.();
+              onSignOut();
+            }}
+          >
+            <LogOut size={16} />
           </button>
         </div>
       </header>
@@ -319,7 +486,7 @@ export default function Studio() {
             <div className="conversation-heading">
               <MessageSquare size={16} />
               <span>Your design conversation</span>
-              <small>Saved on this computer</small>
+              <small>Saved to your account</small>
             </div>
           )}
           {state.messages.length > 0 && (

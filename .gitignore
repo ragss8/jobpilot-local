@@ -11,7 +11,8 @@ training/sources/*.pkl
 training/runs/*/*.safetensors
 training/runs/*/checkpoints/
 
-# Local Python environment, logs and the Ollama model store
+# Local environments, secrets, logs and the Ollama model store
+.env
 .venv/
 __pycache__/
 *.log

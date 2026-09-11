@@ -4,27 +4,49 @@ A fresh conversation is the starting point. Describe the plot and the purpose of
 
 ## Run
 
+Requirements: Node 22.9 or newer, Docker (for the local Postgres), and Ollama on `127.0.0.1:11434` with an installed model. The current machine has `qwen3:4b`; no paid API is required.
+
 ```sh
 npm install
-npm run dev
+cp .env.example .env   # then fill in JWT_SECRET and GOOGLE_CLIENT_ID
+npm run db:up          # Postgres 18 on 127.0.0.1:5433
+npm run server         # accounts and chat-history API on 127.0.0.1:8787
+npm run dev            # the studio on port 5173
 ```
 
-Open **http://127.0.0.1:5173**. Keep Ollama running on `127.0.0.1:11434` with an installed model. The current machine has `qwen3:4b`; no paid API or account is required. The Vite development and preview servers proxy `/ollama` to that loopback service, so no browser CORS override is needed.
+`./start.sh` (or `start.bat`) starts the database, API and studio together.
+
+Open **http://localhost:5173**. Google sign-in only accepts `localhost` as a local origin, so the studio redirects `http://127.0.0.1:5173` (the address Vite prints) there. The Vite development and preview servers proxy `/api` to the API and `/ollama` to the local model, so no browser CORS override is needed.
 
 ```sh
 npm run build
 npm run preview
 npm test
+npm run test:server    # API tests against the Postgres in .env
 ```
 
-A static file host alone does not provide the Ollama proxy. Use the supplied local development/preview server.
+A static file host alone does not provide these proxies. Use the supplied local development/preview server.
+
+## Google sign-in
+
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), configure the OAuth consent screen (External, Testing) and add the demo accounts as test users.
+2. Create an **OAuth client ID** of type **Web application**. Under **Authorized JavaScript origins**, add both `http://localhost` and `http://localhost:5173`. No redirect URI is needed.
+3. Put the client ID in `.env` as `GOOGLE_CLIENT_ID`, list the demo accounts in `ALLOWED_EMAILS`, and restart `npm run server`.
+
+## Accounts and chat history
+
+- Sign In With Google gives the browser a Google ID token, which it posts to `POST /api/auth/google`. The API verifies it against Google's public keys (issuer, audience = your client ID, expiry), requires a verified email on the allow-list, and returns the app's own HS256 JWT, valid for 7 days. Every other API call needs `Authorization: Bearer <jwt>`.
+- Postgres tables: `users` (keyed by Google's `sub`), `conversations` (owner, title and the design state as `jsonb`) and `messages` (one row per chat message, with the time it was recorded). The API only reads or writes conversations owned by the caller.
+- The studio saves the open conversation shortly after each change and reopens your most recent one when you sign in. **History** lists all of your conversations; **New conversation** starts another.
+- Endpoints: `GET /api/conversations` lists yours, `GET /api/conversations/:id` returns one, and `PUT /api/conversations/:id` creates or updates it.
+- A conversation kept in this browser before accounts existed (`aangan-conversation-v3`) moves into the first account that signs in here.
+- This is a local proof of concept: the session JWT is kept in `localStorage`, the database password in `compose.yml` is a local development value, and nothing is deployed.
 
 ## What changed
 
 - No seeded house, automatic bedrooms or initial floor plan.
 - The first load of this version removes `aangan-project-v1`, its recovery key and previous architecture conversation data. A migration marker prevents later reloads from erasing new work.
-- **New conversation** clears architecture-generated browser data again. It preserves assets, rules and unrelated applications' storage. This app has no SQL database.
-- New conversation state is saved under `aangan-conversation-v3`. Export a project or its interpreted brief to keep a separate JSON copy.
+- Export a project or its interpreted brief to keep a separate JSON copy.
 - Qwen extracts a typed floor program. The geometry solver never accepts room coordinates from the model.
 - Bundled local reference documents and a worked example are retrieved by keyword overlap. This is a small reference layer, not an embedding database, fine-tuned model, or a large curated plan corpus.
 - The solver varies core width, shaft/landing width, lobby depth, core side and room allocation. It ranks surviving arrangements by preferred room dimensions, usable area and the existing Vastu score. It then checks the displayed results with the editor's overlap and walkability validator.
@@ -49,17 +71,21 @@ These are conceptual drawings and an interactive browser rendering. Road turning
 
 ## Main files
 
-- `src/Studio.tsx`: conversational workflow, review and desktop views.
+- `src/App.tsx`, `src/Login.tsx`, `src/api.ts`: Google sign-in, the session JWT and API calls.
+- `src/Studio.tsx`: conversational workflow, conversation history, review and desktop views.
+- `server/app.ts`, `server/index.ts`, `server/schema.ts`: accounts and chat-history API, Google token verification and the Postgres schema.
 - `src/program.ts`, `src/brief.ts`: reference retrieval, local model parsing and schema checks.
 - `src/residentialPlanner.ts`, `src/planningRules.ts`: candidate search and room standards.
 - `src/engine.ts`: shared geometry, openings, furniture and collision validation.
 - `src/Plan.tsx`, `src/interiorScene.ts`, `src/Viewer.tsx`: plans, 3D assembly and navigation.
-- `src/studioStorage.ts`: scoped reset and conversation persistence.
+- `src/studioStorage.ts`: conversation types, scoped reset and the pre-account browser storage format.
 - `knowledge/`: local planning references and example.
 
 `Editor.tsx`, `Chat.tsx` and `layout.ts` preserve the earlier editor and corridor solver for migration/reference; the new startup workflow does not call that solver.
 
 ## Browser integration check
+
+These Playwright scripts were written before accounts existed. They open the studio without signing in and read the conversation from `localStorage`, so they need updating before they pass again.
 
 `tests/studio_live_smoke.py` uses the real local model, not a mocked response. With Python Playwright and Chromium installed:
 
