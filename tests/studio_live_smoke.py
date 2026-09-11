@@ -9,11 +9,11 @@ with sync_playwright() as pw:
  errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
  page.goto('http://127.0.0.1:5173')
  # Migration is scoped to architecture keys; an unrelated application key survives.
- page.evaluate("localStorage.removeItem('aangan-fresh-chat-v3'); localStorage.setItem('aangan-project-v1','old design'); localStorage.setItem('jobpilot-test-sentinel','keep')")
+ page.evaluate("localStorage.removeItem('aangan-fresh-chat-v3'); localStorage.setItem('aangan-project-v1','old design'); localStorage.setItem('unrelated-app-sentinel','keep')")
  page.reload()
  expect(page.get_by_role('heading',name='Tell us how you want to live.')).to_be_visible()
  assert page.evaluate("localStorage.getItem('aangan-project-v1')") is None
- assert page.evaluate("localStorage.getItem('jobpilot-test-sentinel')")=='keep'
+ assert page.evaluate("localStorage.getItem('unrelated-app-sentinel')")=='keep'
  assert page.locator('#floor-plan').count()==0
  page.screenshot(path=str(art/'fresh-chat.png'))
  page.get_by_role('button',name='An independent G+3 house',exact=False).click()
@@ -63,7 +63,7 @@ with sync_playwright() as pw:
  page.get_by_role('button',name='New conversation',exact=True).click()
  expect(page.get_by_role('heading',name='Tell us how you want to live.')).to_be_visible()
  assert page.evaluate("localStorage.getItem('aangan-conversation-v3')") is None
- assert page.evaluate("localStorage.getItem('jobpilot-test-sentinel')")=='keep'
+ assert page.evaluate("localStorage.getItem('unrelated-app-sentinel')")=='keep'
  page.reload();expect(page.get_by_role('heading',name='Tell us how you want to live.')).to_be_visible()
  page.set_viewport_size({'width':390,'height':844});page.screenshot(path=str(art/'fresh-chat-mobile.png'))
  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')

@@ -4,8 +4,16 @@ dist/
 artifacts/
 
 training/cache/
+training/data/
 training/models/
 training/sources/ResPlan.zip
 training/sources/*.pkl
 training/runs/*/*.safetensors
 training/runs/*/checkpoints/
+
+# Local Python environment, logs and the Ollama model store
+.venv/
+__pycache__/
+*.log
+/models/
+.DS_Store

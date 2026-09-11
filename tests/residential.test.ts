@@ -176,7 +176,7 @@ test("storage reset removes only architecture-generated data and restores an emp
     ["aangan-project-v1", "old"],
     ["aangan-project-v1-recovery", "old"],
     [CHAT_KEY, "old"],
-    ["jobpilot", "keep"],
+    ["unrelated-app", "keep"],
     ["material-catalogue", "keep"],
   ]);
   const storage = {
@@ -185,7 +185,7 @@ test("storage reset removes only architecture-generated data and restores an emp
     removeItem: (k: string) => map.delete(k),
   } as Storage;
   resetArchitecture(storage);
-  assert.equal(map.get("jobpilot"), "keep");
+  assert.equal(map.get("unrelated-app"), "keep");
   assert.equal(map.get("material-catalogue"), "keep");
   assert.ok(!map.has("aangan-project-v1"));
   assert.ok(!map.has(CHAT_KEY));

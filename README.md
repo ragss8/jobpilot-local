@@ -23,7 +23,7 @@ A static file host alone does not provide the Ollama proxy. Use the supplied loc
 
 - No seeded house, automatic bedrooms or initial floor plan.
 - The first load of this version removes `aangan-project-v1`, its recovery key and previous architecture conversation data. A migration marker prevents later reloads from erasing new work.
-- **New conversation** clears architecture-generated browser data again. It preserves assets, rules and unrelated applications' storage. This app has no SQL database; no JobPilot database or files are reset.
+- **New conversation** clears architecture-generated browser data again. It preserves assets, rules and unrelated applications' storage. This app has no SQL database.
 - New conversation state is saved under `aangan-conversation-v3`. Export a project or its interpreted brief to keep a separate JSON copy.
 - Qwen extracts a typed floor program. The geometry solver never accepts room coordinates from the model.
 - Bundled local reference documents and a worked example are retrieved by keyword overlap. This is a small reference layer, not an embedding database, fine-tuned model, or a large curated plan corpus.
