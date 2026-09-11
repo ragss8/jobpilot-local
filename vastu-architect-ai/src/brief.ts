@@ -1,3 +1,4 @@
+import type { ProjectKind, FeatureRequest } from "./projectTypes";
 /** Turns a written brief into a structured architectural program using a local
  *  Ollama model. The model is treated as untrusted: everything it returns is
  *  validated against a strict guard and then repaired by `normalizeBrief`,
@@ -40,11 +41,20 @@ export interface FloorBrief {
   spaces: SpaceRequest[];
 }
 export interface Brief {
+  groundParkingOnly?: boolean;
+  kind?: ProjectKind;
+  features?: FeatureRequest[];
+  mainZoneAreaSqFt?: number;
+  unitsPerFloor?: number;
+  bedroomsPerUnit?: number;
+  /** Every upper floor is a self-contained let rather than part of one home. */
+  lettable?: boolean;
+  automatic?: boolean;
   lift?: boolean;
   liftToTerrace?: boolean;
   shelter?: boolean;
   assumptions?: string[];
-  site: { width: number; depth: number; facing: Direction };
+  site: { width: number; depth: number; facing: Direction; areaSqFt?: number; assumedShape?: boolean };
   floors: FloorBrief[];
 }
 export const MAX_FLOORS = 5,
@@ -169,6 +179,10 @@ export interface OllamaStatus {
   error?: string;
 }
 export async function checkOllama(host = OLLAMA_HOST): Promise<OllamaStatus> {
+  try {
+    const response=await fetch('/planning-ai/health',{signal:AbortSignal.timeout(1000)});
+    if(response.ok){const status=await response.json();if(status.ready&&typeof status.model==='string')return {ok:true,models:[status.model],model:status.model};}
+  }catch{}
   try {
     const models = await listModels(host, AbortSignal.timeout(5000));
     if (!models.length)
@@ -365,6 +379,8 @@ export function bedroomCount(brief: Brief) {
 }
 /** A short, readable echo of what was understood, shown in the chat. */
 export function describeBrief(brief: Brief) {
+  if(brief.kind==='resort')return [{label:'Resort site program',role:'residential' as const,detail:(brief.features??[]).map(f=>`${f.excluded?'Excluded: ':''}${f.count??''} ${f.kind}${f.source==='default'?' (assumed)':''}`).join(', ')}];
+  if(brief.kind==='apartment')return brief.floors.map(f=>({label:f.label,role:f.role,detail:f.role==='stilt'?'Parking and shared core':`${brief.unitsPerFloor} apartments, ${brief.bedroomsPerUnit} bedrooms per apartment, private kitchens/bathrooms and shared access`}));
   return brief.floors.map((f) => ({
     label: f.label,
     role: f.role,

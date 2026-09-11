@@ -24,6 +24,10 @@ export interface PlanningResult {
   rejected: number;
   reasons: string[];
   assumptions: string[];
+  /** The program actually planned. Set when the planner settled on something
+   *  smaller than the brief proposed, so what is described matches what was
+   *  drawn and a later edit builds on the real program. */
+  brief?: Brief;
 }
 type Rect = { x: number; y: number; w: number; d: number };
 type Slot = SpaceRequest & { name: string };
@@ -116,11 +120,15 @@ export function dimensionIssues(rooms: Room[]) {
       : [];
   });
 }
-export function fixtureIssues(rooms: Room[]) {
+/** A bathroom is required to seat a toilet. A shower is a preference scored in
+ *  `quality`, not a rule: requiring one rejected plans that were otherwise
+ *  sound, and made small plots unplannable altogether. */
+export function fixtureIssues(rooms: Room[], compact = false) {
+  void compact;
   const required: Partial<Record<RoomType, string[]>> = {
     bedroom: ["bed"],
     master: ["bed"],
-    bathroom: ["toilet", "shower"],
+    bathroom: ["toilet"],
     kitchen: ["counter"],
     living: ["sofa"],
     theatre: ["screen", "recliner"],
@@ -160,6 +168,12 @@ function quality(rooms: Room[]) {
       score -= Math.max(0, area - target * 1.4) * excessPenalty;
     }
     if (r.type === "entrance") score -= r.w * r.d * 0.06;
+    // A room shaped like a corridor is a worse room than a square one of the
+    // same area, and it is what a purely area-driven score drifts towards.
+    if (std) {
+      const ratio = Math.max(r.w, r.d) / Math.min(r.w, r.d);
+      score -= Math.max(0, ratio - 1.9) * 9;
+    }
   }
   return score;
 }
@@ -217,28 +231,54 @@ function solveFloor(
     const parking = req.find((s) => s.type === "parking");
     if (!parking)
       throw Error(`${f.label}: describe how many parking bays you need.`);
+    // Full-size cars and a separate pedestrian entry. No decorative room
+    // fillers. A tight plot parks along its frontage rather than nose-in, and
+    // may use the depth in front of the core rather than the strip beside it;
+    // both are real arrangements, so both are tried before refusing.
+    const n = parking.count;
+    const beside = { x: b.x + coreW, y: b.y, w: rearW, d: b.d };
+    // Tiles exactly with the core band above it, so nothing overlaps.
+    const ahead = { x: b.x, y: b.y + cd, w: b.w, d: b.d - cd };
+    const BAY = 8,
+      CAR = { w: 6.2, d: 14.5 };
+    // Nose-in needs the approach depth of a bay you reverse into. Parallel to
+    // the frontage needs only the car's own length and room to clear it,
+    // because an open stilt is driven straight into.
+    const RUN = CAR.d + 1.5;
+    const fit = (rect: Rect) => {
+      if (rect.w >= n * BAY && rect.d >= CAR.d + 3.5)
+        return { rect, across: true, w: CAR.w, d: CAR.d };
+      if (rect.d >= BAY && rect.w >= n * RUN)
+        return { rect, across: false, w: CAR.d, d: CAR.w };
+      return null;
+    };
+    const spot = fit(beside) ?? fit(ahead);
+    if (!spot)
+      throw Error(
+        `${f.label}: ${n} car${n > 1 ? "s need" : " needs"} ${n * BAY} × 18 ft nose-in, or ${n * RUN} × 8 ft along the frontage, beside the stair core or in front of it.`,
+      );
     const bay = room(
       "parking",
       parking.count > 1 ? `${parking.count}-car parking` : "Car parking",
-      { x: b.x + coreW, y: b.y, w: rearW, d: b.d },
+      spot.rect,
       "s",
     );
-    // Full-size cars and a separate pedestrian entry. No decorative room fillers.
-    const n = parking.count;
-    if (rearW < n * 8 || b.d < 18)
-      throw Error(
-        `${f.label}: ${n} car${n > 1 ? "s need" : " needs"} ${n * 8} × 18 ft of clear parking approach beside the stair/lift core.`,
-      );
     bay.furniture = Array.from({ length: n }, (_, i) => ({
       id: uid(),
       kind: "car",
-      x: (rearW - n * 8) / 2 + i * 8 + 0.9,
-      y: 1,
-      w: 6.2,
-      d: 14.5,
+      x: spot.across
+        ? (spot.rect.w - n * BAY) / 2 + i * BAY + (BAY - CAR.w) / 2
+        : (spot.rect.w - n * RUN) / 2 + i * RUN + (RUN - CAR.d) / 2,
+      y: spot.across ? 1 : (spot.rect.d - CAR.w) / 2,
+      w: spot.w,
+      d: spot.d,
       rotation: 0,
     }));
-    const entry = { x: b.x, y: b.y + cd, w: coreW, d: b.d - cd };
+    // The pedestrian entry takes whatever the cars did not.
+    const entry =
+      spot.rect === beside
+        ? { x: b.x, y: b.y + cd, w: coreW, d: b.d - cd }
+        : { x: b.x + coreW, y: b.y, w: rearW, d: cd };
     const services = req.filter(
       (s) => s.type !== "parking" && s.type !== "entrance",
     );
@@ -282,7 +322,7 @@ function solveFloor(
   for (let mask = 0; mask < 2 ** req.length; mask++) {
     const back = req.filter((_, i) => mask & (1 << i)),
       main = req.filter((_, i) => !(mask & (1 << i)));
-    if (back.length > 2 || main.length > 4 || !main.length) continue;
+    if (back.length > 2 || main.length > 6 || !main.length) continue;
     let rearRooms: Room[] = [];
     if (back.length === 1) rearRooms = addSpace(back[0], rear, "w", 0);
     else if (back.length === 2) {
@@ -330,7 +370,7 @@ function solveFloor(
 }
 /** Transform the same buildable frame to the street side. Furniture is
  * re-authored after this transform, so its local coordinates stay meaningful. */
-function orientRoom(
+export function orientRoom(
   r: Room,
   b: Rect,
   actual: Rect,
@@ -362,10 +402,66 @@ function orientRoom(
   }
   Object.assign(r, { x: actual.x + x, y: actual.y + y, w, d });
 }
+/** Solve a floor, transposing the frame first when the plate is wide and
+ *  shallow.
+ *
+ *  The core is laid as a band across the top of the frame with the rooms in
+ *  front of it. On a plate approached from its long side there is no depth
+ *  left for that: a 30 x 40 ft plot entered from the east gives 24 ft back
+ *  from the road, and the core plus its landing eats all but 8 ft of it.
+ *  Solving the transposed frame puts the core along the side instead, which
+ *  is what an architect does with a wide, shallow plot. Rooms come back
+ *  transposed, before orientation and before furniture is authored. */
+/** The frame a floor is actually solved in. A plate approached from its long
+ *  side is solved transposed, so feasibility has to be judged on that frame
+ *  and not on the one the site happens to present. */
+function workingFrame(b: Rect, landing: number): Rect {
+  return b.d < b.w && b.d - 13 - landing < 10
+    ? { x: b.y, y: b.x, w: b.d, d: b.w }
+    : b;
+}
+const FLIP: Record<Room["doorSide"], Room["doorSide"]> = {
+  n: "w",
+  w: "n",
+  s: "e",
+  e: "s",
+};
+function solveOriented(
+  f: FloorBrief,
+  b: Rect,
+  sw: number,
+  lw: number,
+  landing: number,
+  lift: boolean,
+  strategy: number,
+): Room[] {
+  const frame = workingFrame(b, landing);
+  if (frame === b) return solveFloor(f, b, sw, lw, landing, lift, strategy);
+  const rooms = solveFloor(f, frame, sw, lw, landing, lift, strategy);
+  return rooms.map((r) => ({
+    ...r,
+    x: r.y,
+    y: r.x,
+    w: r.d,
+    d: r.w,
+    doorSide: FLIP[r.doorSide],
+    // Furniture is authored in the frame it was solved in, so it transposes
+    // with its room. A piece keeps its footprint, turned a quarter turn.
+    furniture: r.furniture.map((item) => ({
+      ...item,
+      x: item.y,
+      y: item.x,
+      w: item.d,
+      d: item.w,
+    })),
+  }));
+}
 export function planResidence(brief: Brief): PlanningResult {
   const compact = Math.min(brief.site.width, brief.site.depth) < 25;
   const base = defaultProject();
   base.name = "Your independent house";
+  base.kind = "house";
+  base.programFeatures = brief.features;
   base.site = {
     ...brief.site,
     setback: compact ? 1 : 2,
@@ -410,14 +506,15 @@ export function planResidence(brief: Brief): PlanningResult {
           for (const strategy of [0, 1, 2]) {
             attempted++;
             try {
-              if (b.w - sw - lw < 4 || b.d - 13 - landing < 7)
+              const frame = workingFrame(b, landing);
+              if (frame.w - sw - lw < 4 || frame.d - 13 - landing < 7)
                 throw Error(
                   "The buildable rectangle is too small for the vertical core and habitable rooms.",
                 );
               const p = structuredClone(base);
               p.variant = 0;
               p.floors = brief.floors.map((f, i) => {
-                const rooms = solveFloor(
+                const rooms = solveOriented(
                   f,
                   b,
                   sw,
@@ -510,7 +607,7 @@ export function planResidence(brief: Brief): PlanningResult {
     seen.add(signature);
     const errors = p.floors.flatMap((f) => [
       ...validate(p, f),
-      ...fixtureIssues(f.rooms),
+      ...fixtureIssues(f.rooms, compact),
     ]);
     if (errors.length) {
       rejected++;

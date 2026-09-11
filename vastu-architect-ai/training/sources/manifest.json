@@ -1,0 +1,37 @@
+{
+  "repository": "https://github.com/m-agour/ResPlan",
+  "revision": "e2b78fe069aee1ab1e1828a612743f308e3c32a7",
+  "data_license": "CC-BY-4.0",
+  "files": [
+    {
+      "name": "LICENSE",
+      "url": "https://raw.githubusercontent.com/m-agour/ResPlan/e2b78fe069aee1ab1e1828a612743f308e3c32a7/LICENSE",
+      "bytes": 2832,
+      "sha256": "8193a93c99a3c2c576ee8d508a0098d7c90ead3bc6c23caabdbd84b1f93bf499"
+    },
+    {
+      "name": "README.md",
+      "url": "https://raw.githubusercontent.com/m-agour/ResPlan/e2b78fe069aee1ab1e1828a612743f308e3c32a7/README.md",
+      "bytes": 7122,
+      "sha256": "e81d51083e366b99493373f1ed047a4480e167467735d8ca6602e70643674007"
+    },
+    {
+      "name": "split.json",
+      "url": "https://raw.githubusercontent.com/m-agour/ResPlan/e2b78fe069aee1ab1e1828a612743f308e3c32a7/split.json",
+      "bytes": 177059,
+      "sha256": "7761df4ad4c860d7e89d1ef9c7004737cd407615b66ed9cde676d7087108c9a7"
+    },
+    {
+      "name": "croissant.json",
+      "url": "https://raw.githubusercontent.com/m-agour/ResPlan/e2b78fe069aee1ab1e1828a612743f308e3c32a7/croissant.json",
+      "bytes": 7052,
+      "sha256": "a915ed5f14902e099c361e9a7d9da1acbf012bb0036bdc979755ad6422757c84"
+    },
+    {
+      "name": "ResPlan.zip",
+      "url": "https://raw.githubusercontent.com/m-agour/ResPlan/e2b78fe069aee1ab1e1828a612743f308e3c32a7/ResPlan.zip",
+      "bytes": 100106537,
+      "sha256": "f718de8865e51bbe93b49b584798e3c536ed6b4b8a5d32f01b56812f389aeb46"
+    }
+  ]
+}

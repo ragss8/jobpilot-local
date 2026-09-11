@@ -2,3 +2,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 artifacts/
+
+training/cache/
+training/models/
+training/sources/ResPlan.zip
+training/sources/*.pkl
+training/runs/*/*.safetensors
+training/runs/*/checkpoints/

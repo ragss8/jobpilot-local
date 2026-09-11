@@ -4,6 +4,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      "/planning-ai": { target: "http://127.0.0.1:11435", rewrite: path => path.replace(/^\/planning-ai/, "") },
       "/ollama": {
         target: "http://127.0.0.1:11434",
         rewrite: (path) => path.replace(/^\/ollama/, ""),
@@ -12,6 +13,7 @@ export default defineConfig({
   },
   preview: {
     proxy: {
+      "/planning-ai": { target: "http://127.0.0.1:11435", rewrite: path => path.replace(/^\/planning-ai/, "") },
       "/ollama": {
         target: "http://127.0.0.1:11434",
         rewrite: (path) => path.replace(/^\/ollama/, ""),

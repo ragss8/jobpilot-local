@@ -15,6 +15,9 @@ import {
   Undo2,
 } from "lucide-react";
 import Plan from "./Plan";
+import CampusView from "./CampusView";
+import {resolveRequest} from "./requestContext";
+import {planProject,planningIssues} from "./planner";
 import { SIDES, elevationSvg } from "./elevation";
 import { checkOllama, describeBrief, type OllamaStatus } from "./brief";
 import { understand } from "./program";
@@ -109,14 +112,15 @@ export default function Studio() {
   async function submit() {
     if (!text.trim() || busy) return;
     const message = text.trim(),
-      previous = state.brief;
+      context = resolveRequest(text.trim(),state.pendingNew?null:state.brief,state.activeRequest??''),
+      previous = context.previous;
     const messages = [
       ...state.messages,
       { role: "user" as const, text: message },
     ];
-    setState((s) => ({ ...s, messages }));
+    setState((s) => ({ ...s, messages, activeRequest:context.text, pendingNew:context.intent==='new'||s.pendingNew }));
     setText("");
-    setBusy("Understanding your floor-by-floor brief…");
+    setBusy("Understanding your project requirements…");
     const controller = new AbortController();
     abort.current = controller;
     const timer = setTimeout(() => controller.abort(), 120000);
@@ -127,35 +131,35 @@ export default function Studio() {
         throw Error(
           "The local language model is unavailable. Start Ollama with an installed model, then send your brief again. Your message is kept here.",
         );
-      const request = previous
-        ? message
-        : messages
-            .filter((m) => m.role === "user")
-            .map((m) => m.text)
-            .join("\nThen: ");
       const brief = await understand(
-        request,
+        context.text,
         previous,
         status.model,
         controller.signal,
       );
       if (controller.signal.aborted) return;
-      setBusy("Testing 108 arrangements against the planning rules…");
+      setBusy("Testing arrangements for this project type…");
       await new Promise((resolve) => setTimeout(resolve, 30));
       if (controller.signal.aborted) return;
-      const result = planResidence(brief);
+      const planned = planProject(brief);
+      // The planner may have settled on a smaller program than was proposed;
+      // describe and remember what was actually drawn.
+      const result = planned;
+      const effective = planned.brief ?? brief;
       const response = result.proposals.length
-        ? `I found ${result.proposals.length} valid concepts from ${result.attempted} arrangements for your ${brief.site.width} × ${brief.site.depth} ft site.\n\n${describeBrief(
-            brief,
+        ? `I found ${result.proposals.length} valid concepts from ${result.attempted} arrangements for your ${effective.site.width} × ${effective.site.depth} ft site.\n\n${describeBrief(
+            effective,
           )
             .map((f) => `${f.label}: ${f.detail}`)
             .join(
               "\n",
-            )}\n\n${brief.lift ? "The elevator and staircase are aligned on every level. " : "The staircase is aligned on every level. "}Choose a concept, explore a floor, or tell me what to change.`
-        : `I couldn’t find a layout that satisfies the requested program and the configured size rules on ${brief.site.width} × ${brief.site.depth} ft.\n\n${result.reasons.join("\n\n")}\n\nYour requirements are kept. Try a larger plot, fewer parking bays, or a smaller floor program. For this G+3 example, you can say “Use 30 × 40 instead.” This is a limit of the current search and assumptions, not proof that no architect could solve the site.`;
+            )}\n\n${effective.kind==='resort'?"The site layout separates accommodation, amenities and access. ":effective.lift ? "The elevator and staircase are aligned on every level. " : "The staircase is aligned on every level. "}Choose a concept, explore a floor, or tell me what to change.`
+        : `I couldn’t find a layout that satisfies the requested program and the configured size rules on ${brief.site.width} × ${brief.site.depth} ft.\n\n${result.reasons.join("\n\n")}\n\nYour requirements are kept. Try a larger site or revise the requirements described in the conflicts. This is a limit of the current search and assumptions, not proof that no architect could solve the site.`;
       setState({
         messages: [...messages, { role: "assistant", text: response }],
-        brief,
+        brief: effective,
+        activeRequest:context.text,
+        pendingNew:false,
         result,
         choice: 0,
       });
@@ -222,7 +226,7 @@ export default function Studio() {
     >
       <textarea
         ref={input}
-        aria-label="Describe your house"
+        aria-label="Describe your project"
         placeholder={
           project
             ? "Tell me what to change…"
@@ -242,7 +246,7 @@ export default function Studio() {
         <span>
           <MessageSquare size={13} />{" "}
           {state.brief
-            ? "Your earlier requirements stay in context"
+            ? "Corrections update this project; a new project starts fresh"
             : "Start with a thought. Build from there."}
         </span>
         {busy ? (
@@ -308,7 +312,7 @@ export default function Studio() {
               <p>
                 A parking floor. A sunlit hall. A garden above the city.
                 <br />
-                Describe your house, and let’s give every space a purpose.
+                Describe your project, and let’s give every space a purpose.
               </p>
             </div>
           ) : (
@@ -390,7 +394,7 @@ export default function Studio() {
                 </p>
               ))}
               <p>
-                <b>Vertical circulation</b>Stairs
+                <b>{state.brief.kind==='resort'?'Site access':'Vertical circulation'}</b>{state.brief.kind==='resort'?'Pedestrian and vehicle routes':'Stairs'}
                 {state.brief.lift
                   ? `, elevator to ${state.brief.liftToTerrace ? "terrace" : "top residential floor"}`
                   : ""}
@@ -424,7 +428,7 @@ export default function Studio() {
                 <h2>
                   {project.site.width} × {project.site.depth} <small>ft</small>{" "}
                   <i>/</i>{" "}
-                  {project.floors.filter((f) => f.role !== "terrace").length -
+                  {project.kind==='resort'?'Resort masterplan':project.floors.filter((f) => f.role !== "terrace").length -
                     1 >
                   0
                     ? `G+${project.floors.filter((f) => f.role !== "terrace").length - 1}`
@@ -437,7 +441,7 @@ export default function Studio() {
                   aria-label="Export project"
                   onClick={() =>
                     download(
-                      "aangan-house.json",
+                      "aangan-project.json",
                       JSON.stringify(project, null, 2),
                     )
                   }
@@ -473,7 +477,7 @@ export default function Studio() {
                 >
                   Concept {String.fromCharCode(65 + i)}{" "}
                   <small>
-                    {p.notes[0].includes("right") ? "Right" : "Left"} core
+                    {project.kind==='resort'?'Site layout':project.kind==='apartment'?'Shared core':p.notes[0].includes("right") ? "Right core" : "Left core"}
                   </small>
                 </button>
               ))}
@@ -488,7 +492,7 @@ export default function Studio() {
                     { id: "walk", name: "Walkthrough", Icon: Footprints },
                     { id: "elev", name: "Elevation", Icon: House },
                   ] as const
-                ).map(({ id, name, Icon }) => (
+                ).filter(v=>project.kind!=='resort'||v.id==='2d'||v.id==='3d').map(({ id, name, Icon }) => (
                   <button
                     key={id}
                     className={mode === id ? "active" : ""}
@@ -515,7 +519,7 @@ export default function Studio() {
               </select>
             </div>
             <div className="drawing-surface">
-              {mode === "2d" ? (
+              {project.kind==='resort'?<CampusView project={project} three={mode==='3d'}/>:mode === "2d" ? (
                 <Plan
                   project={project}
                   floor={floor}
@@ -641,14 +645,10 @@ export default function Studio() {
               <summary>Planning decisions & checks</summary>
               <p>{state.result?.proposals[state.choice].notes.join(" ")}</p>
               <p>
-                Ranked by preferred room size, usable space and the existing
-                Vastu rules. All displayed concepts passed dimension, overlap
-                and route checks at generation.
+                Concepts use planning rules for the selected project type. Displayed layouts passed the supported geometry, feature and access checks at generation.
               </p>
               {[
-                ...validate(project, floor),
-                ...dimensionIssues(floor.rooms),
-                ...fixtureIssues(floor.rooms),
+                ...planningIssues(project, floor),
               ].map((m, i) => (
                 <p className="check-warning" key={i}>
                   {m}

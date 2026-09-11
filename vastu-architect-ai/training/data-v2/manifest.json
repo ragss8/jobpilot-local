@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "seed": 20260910,
+  "source": "authored-synthetic-v2",
+  "description": "Controlled extraction curriculum only; split-specific wording and unsupported-amenity/building vocabularies. Not independent real-world evaluation.",
+  "system_sha256": "3d01b6df20c4dbc9efb6b0f32abb39327bab408b0efdb4c19fba0a27cb9dde04",
+  "generator_sha256": "ea37977ebfe8b3b1ff85e23f65f49f26d3e53624f9a93fd304f37fc42e753290",
+  "splits": {
+    "train": {
+      "rows": 384,
+      "sha256": "1f37cc86e511aa6dacf4249b727c2139eb045024d86e65317d993de6807d42ce"
+    },
+    "valid": {
+      "rows": 147,
+      "sha256": "158590b285d4123e4a6f972b3fca7491ada48de84d55b1edbfd828333c7712e1"
+    },
+    "test": {
+      "rows": 147,
+      "sha256": "2c9690c60a54e2c4388af74e30a0c565876f210293be55967f173b271af49598"
+    }
+  }
+}

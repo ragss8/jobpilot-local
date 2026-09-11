@@ -8,6 +8,8 @@ export interface Message {
   text: string;
 }
 export interface Conversation {
+  activeRequest?: string;
+  pendingNew?: boolean;
   messages: Message[];
   brief: Brief | null;
   result: PlanningResult | null;

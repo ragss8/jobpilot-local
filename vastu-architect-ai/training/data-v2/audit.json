@@ -1,0 +1,192 @@
+{
+  "passed": true,
+  "errors": [],
+  "within_split_duplicates": [],
+  "limitations": [
+    "Schema and provenance checks do not establish semantic label accuracy.",
+    "Template variants are controlled synthetic tests, not independent real-user data.",
+    "The v1 ResPlan source has upstream geometric near-duplicates across canonical splits; plan-ID disjointness does not remove them."
+  ],
+  "splits": {
+    "train": {
+      "rows": 384,
+      "categories": {
+        "new-counts": 93,
+        "edit-counts": 93,
+        "negation": 93,
+        "multiple-features": 48,
+        "mixed-edit": 6,
+        "project-isolation": 3,
+        "dimension-only-edit": 3,
+        "unsupported-amenity": 12,
+        "negated-unsupported": 3,
+        "unsupported-amenity-edit": 12,
+        "unspecified-count": 12,
+        "unsupported-building": 6
+      },
+      "projectTypes": {
+        "house": 126,
+        "resort": 126,
+        "apartment": 126,
+        "unsupported": 6
+      },
+      "intents": {
+        "new": 177,
+        "edit": 207
+      },
+      "featureKinds": {
+        "jacuzzi": 12,
+        "road": 17,
+        "living": 12,
+        "office": 13,
+        "balcony": 13,
+        "bathroom": 12,
+        "kitchen": 41,
+        "garden": 27,
+        "restaurant": 12,
+        "deck": 17,
+        "lift": 12,
+        "bedroom": 15,
+        "master": 15,
+        "pool": 25,
+        "utility": 13,
+        "pooja": 10,
+        "theatre": 13,
+        "reception": 14,
+        "path": 14,
+        "terrace": 13,
+        "cottage": 11,
+        "dining": 15,
+        "store": 14,
+        "service": 13,
+        "seating": 13,
+        "entrance": 13,
+        "common": 13,
+        "stairs": 15,
+        "recreation": 14,
+        "bar": 11,
+        "parking": 13
+      }
+    },
+    "valid": {
+      "rows": 147,
+      "categories": {
+        "edit-counts": 31,
+        "multiple-features": 12,
+        "unsupported-amenity": 6,
+        "new-counts": 31,
+        "unspecified-count": 12,
+        "negation": 31,
+        "unsupported-amenity-edit": 6,
+        "negated-unsupported": 3,
+        "dimension-only-edit": 3,
+        "mixed-edit": 6,
+        "unsupported-building": 3,
+        "project-isolation": 3
+      },
+      "projectTypes": {
+        "house": 47,
+        "apartment": 47,
+        "resort": 50,
+        "unsupported": 3
+      },
+      "intents": {
+        "edit": 77,
+        "new": 70
+      },
+      "featureKinds": {
+        "theatre": 4,
+        "terrace": 6,
+        "dining": 6,
+        "living": 6,
+        "restaurant": 5,
+        "store": 5,
+        "kitchen": 19,
+        "recreation": 4,
+        "reception": 5,
+        "pooja": 4,
+        "path": 7,
+        "stairs": 5,
+        "utility": 5,
+        "pool": 14,
+        "bedroom": 7,
+        "bathroom": 3,
+        "bar": 3,
+        "garden": 17,
+        "road": 5,
+        "cottage": 3,
+        "office": 3,
+        "service": 3,
+        "deck": 5,
+        "balcony": 4,
+        "master": 3,
+        "jacuzzi": 4,
+        "lift": 3,
+        "parking": 4,
+        "common": 3,
+        "entrance": 4,
+        "seating": 4
+      }
+    },
+    "test": {
+      "rows": 147,
+      "categories": {
+        "negation": 31,
+        "new-counts": 31,
+        "unspecified-count": 12,
+        "unsupported-amenity-edit": 6,
+        "multiple-features": 12,
+        "edit-counts": 31,
+        "mixed-edit": 6,
+        "unsupported-building": 3,
+        "dimension-only-edit": 3,
+        "negated-unsupported": 3,
+        "unsupported-amenity": 6,
+        "project-isolation": 3
+      },
+      "projectTypes": {
+        "house": 47,
+        "resort": 47,
+        "apartment": 50,
+        "unsupported": 3
+      },
+      "intents": {
+        "edit": 77,
+        "new": 70
+      },
+      "featureKinds": {
+        "kitchen": 20,
+        "balcony": 6,
+        "reception": 5,
+        "bedroom": 9,
+        "jacuzzi": 3,
+        "bar": 5,
+        "pool": 13,
+        "utility": 5,
+        "cottage": 3,
+        "common": 4,
+        "seating": 4,
+        "lift": 4,
+        "master": 5,
+        "garden": 16,
+        "office": 4,
+        "entrance": 5,
+        "recreation": 4,
+        "theatre": 4,
+        "bathroom": 5,
+        "deck": 4,
+        "living": 3,
+        "stairs": 4,
+        "road": 4,
+        "pooja": 5,
+        "dining": 4,
+        "path": 5,
+        "parking": 3,
+        "store": 3,
+        "service": 3,
+        "restaurant": 3,
+        "terrace": 3
+      }
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import type { ProjectKind, CampusLayout, FeatureRequest } from "./projectTypes";
 export type RoomType =
   | "living"
   | "bedroom"
@@ -54,6 +55,7 @@ export interface Furniture {
   rotation: number;
 }
 export interface Room {
+  unitId?: string;
   id: string;
   name: string;
   type: RoomType;
@@ -76,6 +78,9 @@ export interface Floor {
   rooms: Room[];
 }
 export interface Project {
+  kind?: ProjectKind;
+  campus?: CampusLayout;
+  programFeatures?: FeatureRequest[];
   version: 2;
   name: string;
   site: {
@@ -188,22 +193,54 @@ export function furnish(r: Room): Furniture[] {
     )
       items.push({ id: uid(), kind, x, y, w, d, rotation: 0 });
   };
-  /** Place a piece against the wall opposite the door, centred on it. */
+  /** Place a piece against the wall opposite the door, centred on it, falling
+   *  back to a side wall. In a shallow room the far wall is close enough to
+   *  the door that nothing large fits between them, but the same piece sits
+   *  happily along a flank - which is where it would go in practice. */
   const against = (kind: Furniture["kind"], w: number, d: number) => {
     const back = { n: "s", s: "n", e: "w", w: "e" }[r.doorSide];
-    if (back === "n") add(kind, (r.w - w) / 2, 0.65, w, d);
-    else if (back === "s") add(kind, (r.w - w) / 2, r.d - d - 0.65, w, d);
-    else if (back === "w") add(kind, 0.65, (r.d - d) / 2, w, d);
-    else add(kind, r.w - w - 0.65, (r.d - d) / 2, w, d);
+    const wall = (side: string) => {
+      if (side === "n") add(kind, (r.w - w) / 2, 0.65, w, d);
+      else if (side === "s") add(kind, (r.w - w) / 2, r.d - d - 0.65, w, d);
+      else if (side === "w") add(kind, 0.65, (r.d - d) / 2, w, d);
+      else add(kind, r.w - w - 0.65, (r.d - d) / 2, w, d);
+    };
+    const before = items.length;
+    wall(back);
+    // Only a room too shallow to seat the piece opposite its door falls back
+    // to a flank. Anywhere else keeps the arrangement it already had, so a
+    // side wall is not taken from something that still needs it.
+    const along = r.doorSide === "n" || r.doorSide === "s" ? r.d : r.w;
+    if (along >= d + 4.5) return;
+    for (const side of ["w", "e", "n", "s"]) {
+      if (items.length > before) return;
+      if (side !== r.doorSide && side !== back) wall(side);
+    }
   };
-  /** Fill a flank wall, one that does not carry the door. */
+  /** Fill a flank wall, one that does not carry the door. Both flanks are
+   *  tried: the first may already be taken by the piece placed before it,
+   *  which is how a shower loses its wall to the toilet in a small bathroom. */
   const flank = (kind: Furniture["kind"], long: number, deep: number) => {
-    const side = r.doorSide === "n" || r.doorSide === "s" ? "w" : "n";
-    if (side === "w") add(kind, 0.5, (r.d - long) / 2, deep, long);
-    else add(kind, (r.w - long) / 2, 0.5, long, deep);
+    const before = items.length;
+    const across = r.doorSide === "n" || r.doorSide === "s";
+    for (const near of [true, false]) {
+      if (items.length > before) return;
+      if (across)
+        add(kind, near ? 0.5 : r.w - deep - 0.5, (r.d - long) / 2, deep, long);
+      else
+        add(kind, (r.w - long) / 2, near ? 0.5 : r.d - deep - 0.5, long, deep);
+    }
   };
   if (r.type === "bedroom" || r.type === "master") {
-    against("bed", Math.min(5.2, r.w - 1.4), Math.min(6.6, r.d - 1.4));
+    // A bed sizes to its room. Keeping it at full length in a compact room
+    // left no way past the door, which failed the whole plan over a few
+    // inches rather than fitting the shorter bed such a room would have.
+    const span = (side: number) => Math.max(0, side - 4);
+    against(
+      "bed",
+      Math.min(5.2, r.w - 1.4, Math.max(3.4, span(r.w))),
+      Math.min(6.6, r.d - 1.4, Math.max(6, span(r.d))),
+    );
     flank("wardrobe", Math.min(4, Math.min(r.w, r.d) - 1.4), 1.6);
   }
   if (r.type === "living") {
@@ -310,7 +347,8 @@ const overlaps = (
 export function doorClearance(r: Room) {
   const gap = 3.6,
     // An open room needs only its threshold kept clear; you can walk around
-    // whatever is in it. An enclosed room needs space to enter and turn.
+    // whatever is in it. An enclosed room needs space to enter and turn, and
+    // enough of it that a walker can still get past whatever is inside.
     deep = isOpen(r.type) ? 1.2 : 3.2;
   if (r.doorSide === "n" || r.doorSide === "s") {
     const x = Math.min(Math.max(0, (r.w - gap) * r.doorOffset), r.w - gap);
@@ -937,14 +975,15 @@ export function parseProject(raw: unknown): Project {
     !p ||
     p.version !== 2 ||
     !str(p.name) ||
+    (p.kind !== undefined && !["house", "apartment", "resort"].includes(p.kind)) ||
     !p.site ||
-    !num(p.site.width, 15, 150) ||
-    !num(p.site.depth, 15, 150) ||
+    !num(p.site.width, 15, p.kind === "resort" ? 2000 : 300) ||
+    !num(p.site.depth, 15, p.kind === "resort" ? 2000 : 300) ||
     !num(p.site.setback, 0, 15) ||
     !num(p.site.front, 0, 20) ||
     !["North", "South", "East", "West"].includes(p.site.facing) ||
     !p.requirements ||
-    !num(p.requirements.bedrooms, 0, 40) ||
+    !num(p.requirements.bedrooms, 0, 120) ||
     !str(p.requirements.style) ||
     !["Strict", "Balanced", "Off"].includes(p.requirements.vastu) ||
     !num(p.requirements.budget, 1, 10000) ||
@@ -952,15 +991,27 @@ export function parseProject(raw: unknown): Project {
     !num(p.variant, 0, 2) ||
     !Array.isArray(p.floors) ||
     p.floors.length < 1 ||
-    p.floors.length > 5
+    p.floors.length > 6
   )
     throw Error("This is not a supported Aangan project.");
+  if (p.campus && p.kind !== "resort") throw Error("Campus data requires a resort planning profile.");
+  if (p.kind === "resort") {
+    const c=p.campus;
+    if(!c || !Array.isArray(c.elements) || c.elements.length<1 || c.elements.length>1000 || !num(c.siteAreaSqFt,1,4000000)) throw Error("Invalid resort site data.");
+    const zone=c.mainZone;
+    if(!zone||![zone.x,zone.y,zone.w,zone.d,c.mainZoneAreaSqFt,c.requestedMainZoneSqFt].every(Number.isFinite)||zone.x<0||zone.y<0||zone.w<=0||zone.d<=0||zone.x+zone.w>p.site.width+.1||zone.y+zone.d>p.site.depth+.1||Math.abs(zone.w*zone.d-c.mainZoneAreaSqFt)>1||!c.capacity||!num(c.capacity.cottages,0,1000)||!num(c.capacity.parking,0,1000)||!Array.isArray(c.notes)||c.notes.length>100||c.notes.some(n=>typeof n!=="string"||n.length>2000))throw Error("Invalid resort allocation data.");
+    for(const e of c.elements)if(!str(e.id)||!str(e.name)||!str(e.kind)||!num(e.x,0,2000)||!num(e.y,0,2000)||!num(e.w,.1,2000)||!num(e.d,.1,2000)||!num(e.height,-20,100)||e.x+e.w>p.site.width+.1||e.y+e.d>p.site.depth+.1)throw Error("Invalid site element.");
+  }
   const ids = new Set<string>();
   const id = (v: unknown) => {
-    if (!str(v) || ids.has(v as string))
+    if (!str(v) || !(v as string).trim() || ids.has(v as string))
       throw Error("Project IDs must be unique.");
     ids.add(v as string);
   };
+  if(p.campus)for(const e of p.campus.elements){id(e.id);if(e.quantity!==undefined&&(!Number.isInteger(e.quantity)||!num(e.quantity,1,1000)))throw Error("Invalid site feature quantity.");}
+  if(p.programFeatures!==undefined){
+    if(!Array.isArray(p.programFeatures)||p.programFeatures.length>100||p.programFeatures.some(f=>!f||!str(f.kind)||typeof f.evidence!=="string"||!["requested","default"].includes(f.source)||(f.count!==null&&(!Number.isInteger(f.count)||!num(f.count,1,1000)))||(f.excluded!==undefined&&typeof f.excluded!=="boolean")))throw Error("Invalid project requirement data.");
+  }
   for (const f of p.floors) {
     id(f.id);
     if (
@@ -968,7 +1019,7 @@ export function parseProject(raw: unknown): Project {
       !num(f.height, 8, 16) ||
       !["stilt", "residential", "terrace"].includes(f.role) ||
       !Array.isArray(f.rooms) ||
-      f.rooms.length < 1 ||
+      (f.rooms.length < 1 && p.kind !== "resort") ||
       f.rooms.length > 60
     )
       throw Error("Invalid floor data.");
@@ -980,10 +1031,10 @@ export function parseProject(raw: unknown): Project {
         !str(r.material) ||
         !Object.hasOwn(roomColors, r.type) ||
         !Object.hasOwn(materialColors, r.material) ||
-        !num(r.x, 0, 150) ||
-        !num(r.y, 0, 150) ||
-        !num(r.w, 2, 150) ||
-        !num(r.d, 2, 150) ||
+        !num(r.x, 0, 300) ||
+        !num(r.y, 0, 300) ||
+        !num(r.w, 2, 300) ||
+        !num(r.d, 2, 300) ||
         !["n", "e", "s", "w"].includes(r.doorSide) ||
         !num(r.doorOffset, 0, 1) ||
         !num(r.windowOffset, 0, 1) ||
