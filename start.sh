@@ -1,8 +1,7 @@
-#!/usr/bin/env bash
-set -euo pipefail
-cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
-if [[ -x .venv/bin/python ]]; then
-  exec .venv/bin/python run.py
-else
-  exec python3 run.py
+#!/usr/bin/env sh
+set -eu
+cd "$(dirname "$0")"
+if [ ! -d node_modules ]; then
+  npm install
 fi
+exec npm run dev
